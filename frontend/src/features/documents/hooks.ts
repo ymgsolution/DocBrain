@@ -64,6 +64,11 @@ function invalidateAfterDocumentChange(queryClient: ReturnType<typeof useQueryCl
   queryClient.invalidateQueries({ queryKey: documentsKeys.detail(id) });
   queryClient.invalidateQueries({ queryKey: ["documents", "list"] });
   queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+  // Marking reviewed / soft-deleting / restoring a document can change its
+  // membership in either queue, so both are kept in lockstep with every
+  // document mutation rather than each call site remembering to do it.
+  queryClient.invalidateQueries({ queryKey: ["reviews"] });
+  queryClient.invalidateQueries({ queryKey: ["trash"] });
 }
 
 export function useUpdateDocument(id: string) {
@@ -94,6 +99,14 @@ export function useRestoreDocument(id: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => documentsApi.restore(id),
+    onSuccess: () => invalidateAfterDocumentChange(queryClient, id),
+  });
+}
+
+export function useHardDeleteDocument(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => documentsApi.hardDelete(id),
     onSuccess: () => invalidateAfterDocumentChange(queryClient, id),
   });
 }

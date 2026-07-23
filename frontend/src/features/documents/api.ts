@@ -24,6 +24,10 @@ export const documentsApi = {
     return apiClient.post<DocumentDetail>(`/documents/${id}/restore`);
   },
 
+  hardDelete(id: string): Promise<void> {
+    return apiClient.delete<void>(`/documents/${id}/permanent`);
+  },
+
   markReviewed(id: string, note?: string): Promise<DocumentDetail> {
     return apiClient.post<DocumentDetail>(`/documents/${id}/reviews`, { note });
   },
