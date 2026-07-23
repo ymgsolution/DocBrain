@@ -2,7 +2,7 @@
 
 > **This is the single source of truth for the project.** It must be updated whenever a feature is added, modified, refactored, removed, or completed. See [Important Rules](#important-rules) at the bottom.
 
-**Last updated:** 2026-07-23 (Phase 4.6 — Version History)
+**Last updated:** 2026-07-23 (Phase 4.7 — Categories Admin)
 
 ---
 
@@ -29,7 +29,7 @@ Full architecture rationale lives in [docs/DOCBRAIN-ARCHITECTURE.md](docs/DOCBRA
 - ✅ Backend Foundation
 - ✅ Backend APIs (all modules from §9.1 of the architecture doc are built and manually verified)
 - 🟨 Testing (extensive manual/curl verification done per-feature on the backend; browser-driven Playwright smoke test done for the shell; no automated `pytest`/component-test suite yet — that's Phase 6 in the roadmap)
-- 🟨 Frontend (Phase 4.1 — Application Shell — complete. Phase 4.2 — Dashboard — complete. Phase 4.3 — Document Explorer — complete. Phase 4.4 — Upload Document — complete. Phase 4.5 — Document Details — complete. Phase 4.6 — Version History — complete: restore-this-version (with the required two-version consequence dialog) and upload-new-version, closing out the Versions tab. Document Details / Version History as originally scoped (S5–S6) is now fully done. Verified end-to-end in a real browser. Phases 4.7–4.9 — Categories, Tags, Settings — not started)
+- 🟨 Frontend (Phase 4.1 — Application Shell — complete. Phase 4.2 — Dashboard — complete. Phase 4.3 — Document Explorer — complete. Phase 4.4 — Upload Document — complete. Phase 4.5 — Document Details — complete. Phase 4.6 — Version History — complete. Phase 4.7 — Categories Admin — complete: table with usage counts, New/Edit/Archive/Unarchive, Delete disabled-with-tooltip while in use, the app's first 403 (`ForbiddenState`) for non-Admins hitting the route directly. Verified end-to-end in a real browser. Phases 4.8–4.9 — Tags, Settings — not started)
 - ⬜ Deployment
 
 ---
@@ -234,14 +234,23 @@ Full architecture rationale lives in [docs/DOCBRAIN-ARCHITECTURE.md](docs/DOCBRA
   - Completed: 2026-07-23
   - Notes: Verified end-to-end with headless-Chromium Playwright against a throwaway test document (not the seed corpus — `DocumentVersion` rows are append-only with no delete endpoint, so testing against seed data would have permanently inflated its version count and the Dashboard's `versionsTracked` total): upload-new-version → v2 becomes current, restore v1 → v3 created and becomes current with `changeNote` "Restored from version 1", Current badge and Restore-button visibility both correct at every step, Activity tab shows both the `VERSION_UPLOADED` and `VERSION_RESTORED` events, and an Employee persona correctly sees neither action. One apparent bug (header still showing the pre-restore version badge in a screenshot) turned out to be the same Supabase network-latency timing already documented elsewhere, not a caching bug — confirmed by reloading fresh, which showed the correct version immediately. The throwaway document was hard-deleted afterward via the API; `totalDocuments`/`versionsTracked` confirmed back at the documented baseline (53 / 99). TypeScript, ESLint, and `next build` all clean.
 
+### Frontend — Categories Admin (Phase 4.7)
+
+- **`ForbiddenState`** (new shared component) — the app's first 403 UI, per §6.10's exact copy ("You don't have permission to view this — requires the {role} role."). `/admin/categories` is reachable directly by URL even though the sidebar already hides its nav link from non-Admins, so the page needed its own guard.
+  - Completed: 2026-07-23
+- **`categoriesApi` gains create/update/delete** (previously list-only, built in Phase 4.3 for the Explorer's filter dropdown). `useCategories()` gained an optional `includeArchived` param, defaulting to `false` so the Explorer's existing call site is unaffected — the admin page passes `true` to show everything.
+  - Completed: 2026-07-23
+- **`/admin/categories`** — table (name, description — hidden below `md`, usage count, status), New/Edit via a shared `CategoryFormDialog`, one-click Archive/Unarchive (a separate action from Edit, per §6.9's explicit button list — not folded into the edit form), and Delete disabled-with-tooltip while `documentCount > 0`, mirroring the backend's exact `ConflictError` condition so the button is disabled before a doomed round trip rather than after.
+  - Completed: 2026-07-23
+  - Notes: The disabled Delete button is wrapped in a `<span tabIndex={0}>` as the actual `TooltipTrigger`, not the button itself — disabled native elements don't reliably fire the hover events a tooltip needs. Verified end-to-end with headless-Chromium Playwright: create → edit → archive → unarchive → delete-blocked-with-tooltip on an in-use seed category (confirmed via the span-hover, not the inert button) → delete-allowed on a throwaway unused category → 403 for a non-Admin persona hitting the URL directly, with the sidebar correctly showing no Categories link for them at all. Category count confirmed back at the documented baseline (12) after cleanup. TypeScript, ESLint, and `next build` all clean.
+
 ---
 
 ## 4. Pending Features
 
 ### High Priority
 
-- Categories admin UI (S9, Phase 4.7), next up
-- Tags admin UI (S9, Phase 4.8)
+- Tags admin UI (S9, Phase 4.8), next up
 
 ### Medium Priority
 
@@ -256,7 +265,7 @@ Full architecture rationale lives in [docs/DOCBRAIN-ARCHITECTURE.md](docs/DOCBRA
 - FR-22: Content text extraction from PDF/DOCX for search (search currently covers title/description/tags/category/original-filename only, not document body text)
 - FR-23: Bulk actions in the Explorer (multi-select re-tag/re-categorise/delete)
 - FR-25: Starred/favourites (not in the DB schema at all yet)
-- System error screens (404/403/500 pages)
+- Generic app-wide 404/500 pages (Next.js `not-found.tsx`/`error.tsx`) — per-page 404 (Document Details) and 403 (Categories admin) states exist; a route the router itself can't resolve at all still falls back to Next's default
 
 ---
 
@@ -316,9 +325,11 @@ DocBrain/
     │   │   ├── (app)/
     │   │   │   ├── layout.tsx       # sidebar + topbar shell
     │   │   │   ├── page.tsx         # dashboard (Phase 4.2 — real widgets, not a placeholder)
-    │   │   │   └── documents/
-    │   │   │       ├── page.tsx     # Explorer (Phase 4.3) — Suspense-wrapped (useSearchParams)
-    │   │   │       └── [id]/page.tsx  # Document Details (Phase 4.5) — header, tabs, edit mode
+    │   │   │   ├── documents/
+    │   │   │   │   ├── page.tsx     # Explorer (Phase 4.3) — Suspense-wrapped (useSearchParams)
+    │   │   │   │   └── [id]/page.tsx  # Document Details (4.5) + Version History (4.6)
+    │   │   │   └── admin/
+    │   │   │       └── categories/page.tsx  # Categories admin (Phase 4.7) — Admin-only, 403 guard
     │   │   └── api/
     │   │       ├── auth/login/route.ts    # sets the httpOnly session cookie
     │   │       ├── auth/logout/route.ts   # clears it
@@ -329,19 +340,21 @@ DocBrain/
     │   │   ├── shared/               # PageHeader, EmptyState, ErrorState, ReviewStatusBadge,
     │   │   │                        # FileTypeIcon, UserAvatar, ConfirmDialog, KpiCard,
     │   │   │                        # DocumentListItem, ActivityFeedItem, SearchBox,
-    │   │   │                        # PaginationBar, UploadDropzone, DownloadLink
+    │   │   │                        # PaginationBar, UploadDropzone, DownloadLink, ForbiddenState
     │   │   └── providers/           # QueryProvider, ThemeProvider
     │   ├── features/
     │   │   ├── auth/                # types.ts, api.ts, hooks.ts, components/login-form.tsx
-    │   │   ├── taxonomy/            # types.ts, api.ts, hooks.ts (categories + tags, list-only —
-    │   │   │                        #   full CRUD lands with the admin screens in 4.7/4.8)
+    │   │   ├── taxonomy/            # types.ts, api.ts (categories: list/create/update/delete;
+    │   │   │                        #   tags: list-only — full CRUD is Phase 4.8), hooks.ts,
+    │   │   │                        # components/CategoryFormDialog.tsx
     │   │   ├── documents/           # types.ts, api.ts (list/get/update/delete/restore/
-    │   │   │                        #   markReviewed/listVersions/create w/ XHR progress), hooks.ts,
-    │   │   │                        # components/ (DocumentFilters, DocumentsTable,
+    │   │   │                        #   markReviewed/listVersions/uploadVersion/restoreVersion/
+    │   │   │                        #   create — all upload paths share an xhrUpload<T>() helper),
+    │   │   │                        # hooks.ts, components/ (DocumentFilters, DocumentsTable,
     │   │   │                        #   DocumentsMobileList, TagFilterCombobox, TagInput,
-    │   │   │                        #   UploadDocumentDialog, DocumentHeader, DocumentPreview,
-    │   │   │                        #   MetadataPanel, EditMetadataForm, MarkReviewedDialog,
-    │   │   │                        #   VersionsTab, DocumentActivityTab)
+    │   │   │                        #   UploadDocumentDialog, UploadVersionDialog, DocumentHeader,
+    │   │   │                        #   DocumentPreview, MetadataPanel, EditMetadataForm,
+    │   │   │                        #   MarkReviewedDialog, VersionsTab, DocumentActivityTab)
     │   │   └── dashboard/           # types.ts, api.ts, hooks.ts,
     │   │                            # components/ (KpiSection, CategoryDistribution,
     │   │                            #   DocumentListCard, ActivityFeed, PendingReviewsBanner,
@@ -456,9 +469,11 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 | Document Details | ✅ Done — header/action bar (role-gated), Overview tab with inline edit, Activity tab, PDF/image/text preview, mark-as-reviewed, delete-with-undo, 404 state |
 | Version History | ✅ Done — version table, restore-this-version (with the two-version consequence dialog), upload-new-version, all role-gated |
 | Search | ✅ Done — full-text search via the Explorer's search box (in-page, debounced) and the topbar's global search box (submit-triggered, from anywhere in the app) |
-| Responsive Design | ✅ Verified for the shell, Dashboard, Explorer, Upload dialog, and Document Details / Version History |
+| Categories (Admin) | ✅ Done — table with usage counts, New/Edit/Archive/Unarchive, Delete disabled-with-tooltip while in use, 403 for non-Admins |
+| Tags (Admin) | ⬜ Not started |
+| Responsive Design | ✅ Verified for the shell, Dashboard, Explorer, Upload dialog, Document Details / Version History, and Categories admin |
 
-**What exists:** Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + shadcn/ui (Base UI primitives) + TanStack Query + React Hook Form + Zod + next-themes, fully wired: design tokens, API layer, BFF proxy, auth guard, login, app shell, a live Dashboard, a live Document Explorer, a live Upload flow, and a live Document Details + Version History page all working end-to-end — verified with headless-Chromium Playwright scripts (shell: 10-step flow; dashboard: full-content check across Admin/Employee personas, dark mode, tablet, mobile; Explorer: filters, pagination, row navigation, empty state, mobile layout; Upload: a real file upload through the full form, progress bar, success toast, cache invalidation; Details: view/edit/save, mark-as-reviewed, activity, 404, soft-delete-with-undo, role-gating; Version History: upload-new-version, restore-this-version, both against a throwaway test document to avoid corrupting the seed corpus's version counts), not just code review. Production build (`next build`) succeeds cleanly; TypeScript and ESLint are both clean.
+**What exists:** Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + shadcn/ui (Base UI primitives) + TanStack Query + React Hook Form + Zod + next-themes, fully wired: design tokens, API layer, BFF proxy, auth guard, login, app shell, a live Dashboard, a live Document Explorer, a live Upload flow, a live Document Details + Version History page, and a live Categories admin screen all working end-to-end — verified with headless-Chromium Playwright scripts (shell: 10-step flow; dashboard: full-content check across Admin/Employee personas, dark mode, tablet, mobile; Explorer: filters, pagination, row navigation, empty state, mobile layout; Upload: a real file upload through the full form, progress bar, success toast, cache invalidation; Details: view/edit/save, mark-as-reviewed, activity, 404, soft-delete-with-undo, role-gating; Version History: upload-new-version, restore-this-version, both against a throwaway test document; Categories: create/edit/archive/unarchive/delete, delete-blocked tooltip, 403 for non-Admins), not just code review. Production build (`next build`) succeeds cleanly; TypeScript and ESLint are both clean.
 
 ---
 
@@ -503,6 +518,10 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 - **2026-07-23** — `xhrUpload<T>()` factored out of `documentsApi.create`/`uploadVersion` once a second call site needed identical XMLHttpRequest-for-progress mechanics — avoids duplicating the same ~20 lines twice.
 - **2026-07-23** — Restore-this-version's confirmation reuses the existing `ConfirmDialog` (parametrized `description` text) rather than a new dialog component — §6.6 only requires naming both version numbers in the copy, which a dynamic description string satisfies without new UI.
 - **2026-07-23** — Version-history mutations (restore, upload-new-version) are tested against a throwaway document created via Upload, never the seed corpus — `DocumentVersion` rows are append-only with no delete endpoint, so testing against seed data would permanently inflate its version count.
+- **2026-07-23** — Categories admin's Archive action is a separate one-click button from Edit, not a checkbox inside the edit form — §6.9 lists `[New] [Edit] [Archive]` as three distinct buttons, and semantically archiving is a reversible visibility toggle while editing changes actual data.
+- **2026-07-23** — Client-side Delete-disabled precheck for categories mirrors the backend's exact `ConflictError` condition (`documentCount > 0` in `taxonomy/service.py`) — same "instant feedback, backend remains authority" pattern as upload validation and review-status thresholds.
+- **2026-07-23** — Tooltips on disabled buttons need the hoverable element to be a wrapping `<span tabIndex={0}>`, not the disabled `<button>` itself — disabled native elements don't reliably fire the pointer/hover events Base UI's `Tooltip.Trigger` needs. First real usage of `Tooltip` in the app to hit this; worth remembering for any future disabled-button-with-tooltip.
+- **2026-07-23** — `ForbiddenState` (403) is a new shared component, not folded into `ErrorState` — a 403 is a permissions statement ("you can't be here"), semantically distinct from a 4xx/5xx failure ("something went wrong"), and future role-gated pages (Tags, Settings) will reuse it as-is.
 
 ---
 
@@ -538,8 +557,7 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 
 ## 11. Next Immediate Tasks
 
-1. Build the Categories admin screen (S9, Phase 4.7), next up — table (name, description, usage count, status), New/Edit/Archive, Delete disabled with a tooltip while in use. `taxonomyApi.categories` list already exists from the Explorer's filter dropdown; this phase adds the create/update/archive mutations.
-2. Build the Tags admin screen (S9, Phase 4.8) — table sorted by usage, Rename, Merge-into (dialog stating how many documents are affected), Delete only at usage = 0.
+1. Build the Tags admin screen (S9, Phase 4.8), next up — table sorted by usage, Rename, Merge-into (dialog stating how many documents are affected), Delete only at usage = 0. `ForbiddenState` and the delete-precheck pattern from Categories (4.7) both carry over directly.
 
 ---
 
@@ -568,6 +586,7 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 
 ### 2026-07-23
 
+- Completed **Phase 4.7 (Categories Admin)** — `/admin/categories` per §6.9: table (name, description, usage count, status), New/Edit via a shared `CategoryFormDialog`, one-click Archive/Unarchive as a separate action from Edit, and Delete disabled-with-tooltip while `documentCount > 0` (client-side precheck mirrors the backend's exact `ConflictError` condition). Built the app's first 403 state (`ForbiddenState`, new shared component, per §6.10's exact copy) since `/admin/categories` is reachable directly by URL even though the sidebar already hides its nav link from non-Admins. `categoriesApi` grew create/update/delete (was list-only since Phase 4.3); `useCategories()` gained an `includeArchived` param defaulting to `false` so the Explorer's existing filter dropdown is unaffected. Found one real cross-browser quirk along the way: a disabled `<button>` doesn't reliably fire the hover events `Tooltip.Trigger` needs, so the trigger has to be a wrapping `<span tabIndex={0}>` instead — the app's first real `Tooltip` usage to hit this. Verified end-to-end with headless-Chromium Playwright: create/edit/archive/unarchive/delete on a throwaway category, delete-blocked tooltip confirmed on a real in-use seed category, and 403 for a non-Admin persona with the sidebar correctly showing no Categories link at all. Category count confirmed back at the documented baseline (12) after cleanup. TypeScript, ESLint, and `next build` all clean.
 - Completed **Phase 4.6 (Version History)** — the two actions deliberately deferred from Phase 4.5: "Upload new version" added to the header's action bar (dropzone + required change note + determinate progress bar, lazy-loaded dialog) and "Restore this version" on every non-current Versions-tab row (reusing `ConfirmDialog`, confirmation names both version numbers per §6.6). Factored a shared `xhrUpload<T>()` helper out of the now-two call sites needing XMLHttpRequest-for-progress. This closes out Document Details / Version History (S5–S6) as originally scoped. Verified end-to-end with headless-Chromium Playwright against a throwaway test document — never the seed corpus, since `DocumentVersion` rows are append-only with no delete endpoint and would permanently inflate the seed's version counts: upload-new-version, restore, Current-badge/Restore-button visibility at every step, both activity events, and Employee-role gating. Confirmed the seed corpus's documented baseline (53 documents, 99 versions) was unaffected after cleanup. TypeScript, ESLint, and `next build` all clean.
 - Completed **Phase 4.5 (Document Details)** — header/role-gated action bar, Overview tab with inline edit mode (reusing `TagInput` from Upload), a read-only Versions tab, an Activity tab, PDF/image/text preview, mark-as-reviewed, and delete-with-undo. Found and fixed two real architectural gaps before implementing: (1) corrected an earlier assumption that downloads needed a signed-URL scheme — they don't, the BFF proxy's cookie-to-Bearer translation already covers plain links; the actual fix was forwarding `Content-Disposition`/`X-Content-Type-Options` through the generic proxy, which it was silently dropping; (2) added an optional `documentId` filter to the existing `GET /dashboard/activity` endpoint for the Activity tab, reusing the schema rather than adding a new route. Also found and fixed a **real, previously-latent bug via browser testing**: the BFF proxy crashed with a 500 on any 204 No Content response (the Fetch spec forbids a body on null-body-status Responses) — `DELETE /documents/{id}` was the first 204 this proxy ever had to forward, so the bug had been dormant since Phase 4.1. Verified end-to-end with headless-Chromium Playwright: view→edit→save, mark-as-reviewed, versions table, activity feed (including the test's own trash/restore cycle, proving the audit trail is genuine), a 404 state, soft-delete→redirect→toast→Undo→restored, and Employee-role gating. PDF preview correctness was confirmed by fetching the content URL directly (valid 5-page PDF, correct headers) rather than a screenshot, since headless Chromium has no PDF-viewer plugin — not a product bug. TypeScript, ESLint, and `next build` all clean.
 - Completed **Phase 4.4 (Upload Document)** — a single unified upload modal per architecture doc §6.3 (correcting my own earlier "two-step stepper" mischaracterization), built from a new `UploadDropzone` (shared) and `TagInput` (creatable, distinct from the Explorer's filter-only `TagFilterCombobox`). `documentsApi.create()` uses `XMLHttpRequest` for a real determinate progress bar (`fetch` can't observe upload progress). Non-dismissible mid-upload via a single `onOpenChange` guard that covers Escape/outside-click/close-button/Cancel uniformly. Client-side extension/size pre-validation mirrors the backend's `core/config.py` defaults. Topbar's Upload button is now fully wired (both topbar buttons — search and upload — are live as of this phase). Verified end-to-end with headless-Chromium Playwright using a real file upload: validation-disabled submit button, auto-filled title, category selection, tag creation (existing + brand-new), progress bar, success toast, dialog auto-close, the new document appearing in the Explorer and the Dashboard's activity feed (cache invalidation confirmed, not assumed), and a rejected unsupported file type — zero console errors. Test artifacts deleted afterward via the API so the seed corpus stays at its documented 53-document baseline. TypeScript, ESLint, and `next build` all clean.
