@@ -2,7 +2,7 @@
 
 > **This is the single source of truth for the project.** It must be updated whenever a feature is added, modified, refactored, removed, or completed. See [Important Rules](#important-rules) at the bottom.
 
-**Last updated:** 2026-07-23 (Phase 4.1 — Application Shell)
+**Last updated:** 2026-07-23 (Phase 4.2 — Dashboard)
 
 ---
 
@@ -29,7 +29,7 @@ Full architecture rationale lives in [docs/DOCBRAIN-ARCHITECTURE.md](docs/DOCBRA
 - ✅ Backend Foundation
 - ✅ Backend APIs (all modules from §9.1 of the architecture doc are built and manually verified)
 - 🟨 Testing (extensive manual/curl verification done per-feature on the backend; browser-driven Playwright smoke test done for the shell; no automated `pytest`/component-test suite yet — that's Phase 6 in the roadmap)
-- 🟨 Frontend (Phase 4.1 — Application Shell — complete: design tokens, API layer, auth, login, sidebar/topbar/shell all working end-to-end in a real browser. Phases 4.2–4.9 — Dashboard, Explorer, Upload, Details, Version History, Categories, Tags, Settings — not started)
+- 🟨 Frontend (Phase 4.1 — Application Shell — complete. Phase 4.2 — Dashboard — complete: KPIs, category distribution, recently-added/accessed, expiring-soon, pending-reviews banner, activity feed, all working end-to-end in a real browser. Phases 4.3–4.9 — Explorer, Upload, Details, Version History, Categories, Tags, Settings — not started)
 - ⬜ Deployment
 
 ---
@@ -143,14 +143,34 @@ Full architecture rationale lives in [docs/DOCBRAIN-ARCHITECTURE.md](docs/DOCBRA
   - Completed: 2026-07-23
   - Notes: Found and fixed a real bug via browser testing — the user menu crashed on open (`MenuGroupContext is missing`) because Base UI (shadcn's primitive library here, not Radix) requires `DropdownMenuLabel` to be wrapped in `DropdownMenuGroup`, unlike Radix where it worked standalone. Verified the full login → shell → dark mode → mobile → logout loop with a headless-Chromium Playwright script (screenshots + console-error check), not just code review.
 
+### Frontend — Dashboard (Phase 4.2)
+
+- **`dashboardApi` feature module** — `features/dashboard/{types,api,hooks}.ts`, consuming `GET /dashboard/summary` and `GET /dashboard/activity` through the shared `apiClient`. Shared `DocumentSummary`/`CategorySummary`/`TagSummary`/`VersionSummary`/`ReviewStatus` types moved to `src/types/document.ts` so the upcoming Explorer/Details phases reuse them instead of redefining them.
+  - Completed: 2026-07-23
+- **KPI section** — 4 KPI cards (Total Documents, Uploaded This Week, Versions Tracked, Categories In Use), 2-col on mobile → 4-col from `lg` up.
+  - Completed: 2026-07-23
+- **Pending Reviews banner** — role-gated (Reviewer/Admin only, via a `REVIEWER_ROLES` constant shared with the sidebar's nav-item gating so both surfaces can never drift apart), hidden entirely when the count is 0.
+  - Completed: 2026-07-23
+- **Documents by Category** — horizontal bar list (shadcn `Progress`), each row a link to `/documents?categoryId=…` (Explorer doesn't exist until Phase 4.3 — link is wired now, page lands once built, same forward-dependency pattern already used for the topbar's disabled Upload/Search buttons).
+  - Completed: 2026-07-23
+- **Recently Added / Recently Accessed / Expiring Soon** — one generic `DocumentListCard` (title/icon/list/empty-state/"View all" link) reused for all three via props, instead of three near-duplicate components. Expiring Soon shows a `ReviewStatusBadge` computed client-side by `getReviewStatus()`, which mirrors the backend's exact overdue/due-soon/ok thresholds (`documents/repository.py`) so a document is never badged differently than it would filter in the Explorer.
+  - Completed: 2026-07-23
+  - Notes: `DocumentSummary` (as returned by `/dashboard/summary`) has no `lastAccessedAt` field, only `updatedAt` — "Recently Accessed" currently displays `updatedAt` as its meta line for lack of a more precise timestamp from the backend. Not a frontend bug; flagged in Known Issues.
+- **Activity feed** — reads `GET /dashboard/activity`, each row an `ActivityFeedItem` (avatar + summary + relative time via a new dependency-free `formatRelativeTime()` helper — no date library added, per the "no unnecessary dependencies" rule).
+  - Completed: 2026-07-23
+- **New shared components** — `KpiCard`, `DocumentListItem`, `ActivityFeedItem` (in `components/shared/`, reusable by future Explorer/Details phases, not dashboard-specific).
+  - Completed: 2026-07-23
+- **Loading/error states** — independent skeletons for the summary and activity queries (one slow endpoint doesn't block the other), `ErrorState` with retry for both, empty states for every list widget.
+  - Completed: 2026-07-23
+  - Notes: Found and fixed a real Base UI console warning via browser testing — `Button` rendered as a `Link` (`render={<Link .../>}`, used for "View all" / "Review now") needs `nativeButton={false}`, since Base UI's `Button` defaults to expecting a real `<button>` element. Verified zero console errors after the fix, across desktop/dark-mode/tablet/mobile, and across both an Admin persona (banner + all widgets visible) and an Employee persona (banner and Pending-Reviews nav item both correctly hidden).
+
 ---
 
 ## 4. Pending Features
 
 ### High Priority
 
-- Dashboard UI (S2) — Phase 4.2, next up
-- Document Explorer UI — list/filter/search/paginate (S3)
+- Document Explorer UI — list/filter/search/paginate (S3), next up
 - Upload UI — the two-step stepper with drag-and-drop (S4)
 - Document Details UI — overview/versions/activity tabs (S5–S7)
 
@@ -228,7 +248,7 @@ DocBrain/
     │   │   ├── (auth)/login/page.tsx
     │   │   ├── (app)/
     │   │   │   ├── layout.tsx       # sidebar + topbar shell
-    │   │   │   └── page.tsx         # dashboard (placeholder — real one is Phase 4.2)
+    │   │   │   └── page.tsx         # dashboard (Phase 4.2 — real widgets, not a placeholder)
     │   │   └── api/
     │   │       ├── auth/login/route.ts    # sets the httpOnly session cookie
     │   │       ├── auth/logout/route.ts   # clears it
@@ -237,18 +257,27 @@ DocBrain/
     │   │   ├── ui/                  # 23 shadcn primitives (Base UI, not Radix)
     │   │   ├── layout/              # Sidebar, Topbar, UserMenu, ThemeToggle, AppBreadcrumb, nav-items.ts
     │   │   ├── shared/               # PageHeader, EmptyState, ErrorState, ReviewStatusBadge,
-    │   │   │                        # FileTypeIcon, UserAvatar, ConfirmDialog
+    │   │   │                        # FileTypeIcon, UserAvatar, ConfirmDialog, KpiCard,
+    │   │   │                        # DocumentListItem, ActivityFeedItem
     │   │   └── providers/           # QueryProvider, ThemeProvider
     │   ├── features/
-    │   │   └── auth/                # types.ts, api.ts, hooks.ts, components/login-form.tsx
-    │   │                            # (other features' api layers get built in their own phase)
+    │   │   ├── auth/                # types.ts, api.ts, hooks.ts, components/login-form.tsx
+    │   │   └── dashboard/           # types.ts, api.ts, hooks.ts,
+    │   │                            # components/ (KpiSection, CategoryDistribution,
+    │   │                            #   DocumentListCard, ActivityFeed, PendingReviewsBanner,
+    │   │                            #   WidgetSkeleton)
+    │   │                            # (remaining features' api layers get built in their own phase)
     │   ├── lib/
     │   │   ├── api-client.ts        # typed fetch wrapper + ApiError, targets /api/bff
     │   │   ├── constants.ts         # TOKEN_COOKIE, API_BASE_URL
-    │   │   ├── format.ts            # getInitials()
+    │   │   ├── format.ts            # getInitials(), formatRelativeTime(), getReviewStatus()
     │   │   └── utils.ts             # cn()
     │   ├── hooks/                   # empty — cross-feature hooks land here as needed
-    │   └── types/api.ts             # UserRole, ApiErrorBody, PagedResponse<T>
+    │   └── types/
+    │       ├── api.ts               # UserRole, ApiErrorBody, PagedResponse<T>
+    │       └── document.ts          # ReviewStatus, CategorySummary, TagSummary,
+    │                                 # VersionSummary, DocumentSummary — shared across
+    │                                 # dashboard/Explorer/Details, not duplicated per-feature
     └── public/
 ```
 
@@ -336,15 +365,15 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 |---|---|
 | Layout / app shell | ✅ Done — sidebar, topbar, breadcrumb, user menu, theme toggle, responsive mobile drawer |
 | Login | ✅ Done — persona picker (live data) + email form, RHF + Zod |
-| Dashboard | 🟨 Placeholder only — proves auth/shell/API layer work; real widgets are Phase 4.2 |
+| Dashboard | ✅ Done — KPIs, category distribution, recently-added/accessed, expiring-soon, role-gated pending-reviews banner, activity feed, all live-data |
 | Upload | ⬜ Not started (topbar button present but disabled) |
-| Explorer | ⬜ Not started (search box present but disabled) |
-| Document Details | ⬜ Not started |
+| Explorer | ⬜ Not started (search box present but disabled; dashboard widgets already link to `/documents?...` query params it will need to read) |
+| Document Details | ⬜ Not started (dashboard document rows already link to `/documents/{id}`, which 404s until Phase 4.5 — same forward-dependency pattern as the disabled topbar buttons) |
 | Version History | ⬜ Not started |
 | Search | ⬜ Not started |
-| Responsive Design | ✅ Verified for the shell (sidebar collapses to a `Sheet` drawer below `lg`) — not yet verified for feature pages that don't exist yet |
+| Responsive Design | ✅ Verified for the shell and now the Dashboard (mobile/tablet/desktop screenshots, no horizontal scroll, KPI grid 2→4 cols, widget grids collapse to 1 col below `lg`) |
 
-**What exists:** Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + shadcn/ui (Base UI primitives) + TanStack Query + React Hook Form + Zod + next-themes, fully wired: design tokens, API layer, BFF proxy, auth guard, login, and app shell all working end-to-end — verified with a headless-Chromium Playwright script (10-step flow: redirect-when-logged-out → login → dashboard content → sidebar role-filtering → user menu → dark mode → mobile drawer → logout → session-cleared-redirect), not just code review. Production build (`next build`) succeeds cleanly; TypeScript and ESLint are both clean.
+**What exists:** Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + shadcn/ui (Base UI primitives) + TanStack Query + React Hook Form + Zod + next-themes, fully wired: design tokens, API layer, BFF proxy, auth guard, login, app shell, and a live Dashboard all working end-to-end — verified with headless-Chromium Playwright scripts (shell: 10-step flow; dashboard: full-content check across Admin and Employee personas, dark mode, tablet, and mobile viewports), not just code review. Production build (`next build`) succeeds cleanly; TypeScript and ESLint are both clean.
 
 ---
 
@@ -369,6 +398,10 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 - **2026-07-23** — Next.js 16 renamed `middleware.ts` → `proxy.ts` (exported fn `proxy`, not `middleware`); it also now runs on the full Node.js runtime rather than edge-only. Used for the auth guard (`src/proxy.ts`), presence-check only (not full JWT verification — the backend is the real authority and 401s are caught client-side as a second line of defense).
 - **2026-07-23** — Auth token lives in an httpOnly cookie set by a Next.js route handler (`/api/auth/login`), never in `localStorage` or client-readable JS — matches the architecture doc's §17.5 requirement and is enforced structurally (the browser literally cannot read it), not just by convention.
 - **2026-07-23** — API layer built incrementally, one module at a time, as each frontend phase needs it — not all six modules' API clients built upfront in Phase 4.1. Avoids speculative code for endpoints no page calls yet.
+- **2026-07-23** — Shared domain types (`ReviewStatus`, `CategorySummary`, `TagSummary`, `VersionSummary`, `DocumentSummary`) live in `src/types/document.ts`, not inside `features/dashboard/`, because the Explorer and Document Details phases will need the exact same shapes — one definition avoids the shapes drifting apart across features.
+- **2026-07-23** — Client-side review-status thresholds (`getReviewStatus()` in `lib/format.ts`) hard-mirror the backend's exact overdue/due-soon/ok cutoffs (`documents/repository.py`'s `<today` / `today..today+30` / `>today+30`), rather than inventing separate frontend thresholds — a document must never show a different badge than it would filter to via the same `reviewStatus` query param in the Explorer.
+- **2026-07-23** — No date-formatting library added for the activity feed's relative timestamps (`formatRelativeTime()` uses the built-in `Intl.RelativeTimeFormat`) — matches the "no unnecessary dependencies" rule; revisit only if a real need for timezone-aware or locale-heavy formatting appears later.
+- **2026-07-23** — Dashboard widgets that reuse the same card shape (Recently Added / Recently Accessed / Expiring Soon) are one generic `DocumentListCard` driven by props (`meta`, `trailing` render functions), not three near-identical components — avoids the "duplicate logic" anti-pattern the frontend spec explicitly calls out.
 
 ---
 
@@ -382,10 +415,13 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 - ~~Seed script could generate version-upload timestamps in the future relative to "today"~~ — fixed by computing `created_at` with enough backward buffer for the chosen version count. Fixed 2026-07-23.
 - ~~Hard-deleting a document with a restored version (`restored_from_version_id` pointing at a version being deleted in the same batch) threw a 500 (FK violation)~~ — fixed via `ON DELETE SET NULL` migration. Fixed 2026-07-23.
 - ~~User menu crashed on open (`Base UI: MenuGroupContext is missing`)~~ — `DropdownMenuLabel` needed a `DropdownMenuGroup` wrapper (Base UI is stricter than Radix here). Found via browser testing, fixed 2026-07-23.
+- ~~Base UI console warning on Dashboard: `Button` rendered as a `Link` ("View all" / "Review now") expected a native `<button>`~~ — needed `nativeButton={false}` when polymorphically rendering as an `<a>`. Found via browser testing, fixed 2026-07-23.
 
 ### Open
 
-- **No automated test suite.** All backend verification so far has been manual (curl + direct DB queries); the frontend has one ad hoc Playwright smoke script (not checked into the repo — lives in the session scratchpad) rather than a real test suite. Thorough, but not regression-proof. Formal `pytest`/component-test suites are Phase 6 in the roadmap, not yet started.
+- **No automated test suite.** All backend verification so far has been manual (curl + direct DB queries); the frontend has ad hoc Playwright smoke scripts (not checked into the repo — live in the session scratchpad) rather than a real test suite. Thorough, but not regression-proof. Formal `pytest`/component-test suites are Phase 6 in the roadmap, not yet started.
+- **Dashboard's "Recently Accessed" widget shows `updatedAt`, not a true "last accessed" timestamp.** `GET /dashboard/summary` returns `DocumentSummary` objects, which don't include `lastAccessedAt` (only `DocumentDetail` does, via the document-detail endpoint). Not worth a backend schema change for one dashboard widget's label right now — revisit if it's noticeably confusing in practice.
+- **Dashboard document links point at `/documents/{id}` and category/review-status links point at `/documents?...`, neither of which exist yet.** Intentional forward-dependency (Explorer is Phase 4.3, Details is Phase 4.5) — clicking them 404s until those phases land, same accepted pattern as the topbar's disabled Upload/Search buttons.
 - **Browser can't directly download files via a plain link.** `GET /versions/{n}/content` requires a Bearer token; a plain `<a href>` in a browser won't attach one. The architecture doc already flags this as the one deliberate exception to the BFF-proxies-everything pattern (§10.2) — needs a signed/short-lived-token URL or signed cookie once the frontend is built. Not a bug, but not yet solved either.
 - **Search doesn't cover document body text.** `search_vector` indexes title, description, tags, category name, and current filename — not the actual PDF/DOCX content (FR-22, deferred).
 - **No duplicate-upload detection.** SHA-256 checksums are computed and stored per version, but nothing checks "does this content already exist?" and warns the user (FR-21, deferred).
@@ -394,10 +430,9 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 
 ## 11. Next Immediate Tasks
 
-1. Build the `dashboardApi` API layer + Dashboard UI (S2, Phase 4.2) — KPIs, category chart, recently-added/accessed, expiring-soon, activity feed, consuming `GET /dashboard/summary` + `/dashboard/activity`. Every widget links into a pre-filtered Explorer per the architecture doc's design rule.
-2. Build the `documentsApi` API layer + Document Explorer (S3, Phase 4.3), consuming `GET /documents` with URL-driven filter state — this also unblocks wiring up the topbar's search box.
-3. Build the Upload flow (S4, Phase 4.4), consuming `POST /documents` (multipart) — unblocks the topbar's Upload button.
-4. Build Document Details + Version History (S5–S6, Phases 4.5–4.6).
+1. Build the `documentsApi` API layer + Document Explorer (S3, Phase 4.3), consuming `GET /documents` with URL-driven filter state (`categoryId`, `reviewStatus`, etc. — the query params the Dashboard already links to). This also unblocks wiring up the topbar's search box.
+2. Build the Upload flow (S4, Phase 4.4), consuming `POST /documents` (multipart) — unblocks the topbar's Upload button.
+3. Build Document Details + Version History (S5–S6, Phases 4.5–4.6) — makes the Dashboard's `/documents/{id}` links resolve instead of 404ing.
 
 ---
 
@@ -426,6 +461,7 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 
 ### 2026-07-23
 
+- Completed **Phase 4.2 (Dashboard)** — `dashboardApi` feature module, KPI section, role-gated Pending Reviews banner, Documents by Category bar chart, Recently Added / Recently Accessed / Expiring Soon (one generic `DocumentListCard`, not three duplicates), and a Recent Activity feed, all consuming the live `GET /dashboard/summary` and `GET /dashboard/activity` endpoints. New shared types (`src/types/document.ts`) and shared components (`KpiCard`, `DocumentListItem`, `ActivityFeedItem`) built for reuse by the Explorer and Document Details phases. Verified end-to-end with headless-Chromium Playwright scripts across an Admin persona (all widgets + banner visible) and an Employee persona (banner and admin-only nav correctly hidden), plus dark mode, tablet, and mobile viewports — zero console errors after fixing one real Base UI warning (`nativeButton={false}` needed when rendering `Button` as a `Link`). TypeScript, ESLint, and `next build` all clean.
 - Completed **Phase 4.1 (Application Shell)** — design tokens (from-scratch enterprise palette + a fixed font-loading bug), API layer foundation, BFF proxy, auth guard, login page, reusable component library, and the full sidebar/topbar shell. Verified end-to-end with a real headless-Chromium Playwright script (10-step flow, screenshots, console-error check) — not just code review. Found and fixed one real bug along the way (`DropdownMenuLabel` needing a `DropdownMenuGroup` wrapper under Base UI). TypeScript, ESLint, and `next build` all clean.
 - Converted the entire backend API to camelCase JSON (was snake_case, doc specifies camelCase) — new `CamelModel` schema base + aliased query/form params across all 6 modules. Re-verified all 12 endpoint categories end-to-end with the new wire format, including nested objects, list filters, multipart form fields, and validation-error field names.
 - Created `PROJECT_STATUS.md` as the project's single source of truth.
