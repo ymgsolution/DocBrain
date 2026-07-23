@@ -1,17 +1,18 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { categoriesApi, tagsApi } from "./api";
+import type { CategoryCreatePayload, CategoryUpdatePayload } from "./types";
 
 export const taxonomyKeys = {
-  categories: ["taxonomy", "categories"] as const,
+  categories: (includeArchived: boolean) => ["taxonomy", "categories", includeArchived] as const,
   tags: ["taxonomy", "tags"] as const,
 };
 
-export function useCategories() {
+export function useCategories(includeArchived = false) {
   return useQuery({
-    queryKey: taxonomyKeys.categories,
-    queryFn: () => categoriesApi.list(),
+    queryKey: taxonomyKeys.categories(includeArchived),
+    queryFn: () => categoriesApi.list({ includeArchived }),
   });
 }
 
@@ -21,5 +22,33 @@ export function useTags() {
   return useQuery({
     queryKey: taxonomyKeys.tags,
     queryFn: () => tagsApi.list({ limit: 100 }),
+  });
+}
+
+function invalidateCategories(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: ["taxonomy", "categories"] });
+}
+
+export function useCreateCategory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: CategoryCreatePayload) => categoriesApi.create(payload),
+    onSuccess: () => invalidateCategories(queryClient),
+  });
+}
+
+export function useUpdateCategory(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: CategoryUpdatePayload) => categoriesApi.update(id, payload),
+    onSuccess: () => invalidateCategories(queryClient),
+  });
+}
+
+export function useDeleteCategory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => categoriesApi.delete(id),
+    onSuccess: () => invalidateCategories(queryClient),
   });
 }

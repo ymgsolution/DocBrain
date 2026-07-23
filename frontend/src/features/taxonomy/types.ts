@@ -13,3 +13,16 @@ export interface Tag {
   name: string;
   usageCount: number;
 }
+
+export interface CategoryCreatePayload {
+  name: string;
+  description?: string;
+  defaultReviewPeriodDays?: number;
+}
+
+export interface CategoryUpdatePayload {
+  name?: string;
+  description?: string;
+  defaultReviewPeriodDays?: number;
+  isArchived?: boolean;
+}
