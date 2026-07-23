@@ -2,7 +2,7 @@
 
 > **This is the single source of truth for the project.** It must be updated whenever a feature is added, modified, refactored, removed, or completed. See [Important Rules](#important-rules) at the bottom.
 
-**Last updated:** 2026-07-23 (Phase 4.4 — Upload Document)
+**Last updated:** 2026-07-23 (Phase 4.5 — Document Details)
 
 ---
 
@@ -29,7 +29,7 @@ Full architecture rationale lives in [docs/DOCBRAIN-ARCHITECTURE.md](docs/DOCBRA
 - ✅ Backend Foundation
 - ✅ Backend APIs (all modules from §9.1 of the architecture doc are built and manually verified)
 - 🟨 Testing (extensive manual/curl verification done per-feature on the backend; browser-driven Playwright smoke test done for the shell; no automated `pytest`/component-test suite yet — that's Phase 6 in the roadmap)
-- 🟨 Frontend (Phase 4.1 — Application Shell — complete. Phase 4.2 — Dashboard — complete. Phase 4.3 — Document Explorer — complete. Phase 4.4 — Upload Document — complete: drag-and-drop upload modal with progress bar, creatable tag input, client-side validation, wired to the topbar's Upload button, all verified end-to-end in a real browser including a real file upload. Phases 4.5–4.9 — Document Details, Version History, Categories, Tags, Settings — not started)
+- 🟨 Frontend (Phase 4.1 — Application Shell — complete. Phase 4.2 — Dashboard — complete. Phase 4.3 — Document Explorer — complete. Phase 4.4 — Upload Document — complete. Phase 4.5 — Document Details — complete: header/action bar, Overview tab with inline edit mode, Versions tab (read-only — restore/new-version land in 4.6), Activity tab, preview pane, mark-as-reviewed, delete-with-undo, all verified end-to-end in a real browser. Found and fixed a real pre-existing bug in the BFF proxy along the way (see §10). Phases 4.6–4.9 — Version History actions, Categories, Tags, Settings — not started)
 - ⬜ Deployment
 
 ---
@@ -199,18 +199,42 @@ Full architecture rationale lives in [docs/DOCBRAIN-ARCHITECTURE.md](docs/DOCBRA
   - Completed: 2026-07-23
   - Notes: Verified end-to-end with headless-Chromium Playwright using a real uploaded file: empty-state submit-button-disabled check, file selection with auto-filled title, category select, tag creation (both an existing-tag suggestion and a brand-new tag), description, review date, progress bar, success toast, dialog auto-close, the new document appearing in both the Explorer and the Dashboard's Recent Activity feed immediately after (cache invalidation confirmed working, not just assumed), and a rejected `.exe` file correctly showing the unsupported-type error. Zero console errors. The test document and tag were deleted afterward via the API so the seed corpus stays at its documented baseline (53 documents). TypeScript, ESLint, and `next build` all clean.
 
+### Frontend — Document Details (Phase 4.5)
+
+- **Two architectural gaps found and fixed before implementing** — per the "explain before implementing" rule:
+  1. **Corrected an earlier assumption about file downloads.** §10.2 (and this file's own earlier Known Issues entry) assumed downloads needed a signed/short-lived-token URL because a browser can't attach a Bearer header to a plain `<a href>`. That's true for a bare API call, but **not** for a same-origin request through the BFF — the browser sends the httpOnly session cookie automatically, and the BFF proxy already turns that into the Bearer header before calling FastAPI. So a plain `<a href="/api/bff/documents/{id}/versions/{n}/content">` just works, no signed URL needed. The actual bug was narrower: the generic BFF proxy (`route.ts`) only forwarded `content-type` from the backend response, silently dropping `Content-Disposition` (filename, inline-vs-attachment) and `X-Content-Type-Options`. Fixed by forwarding both headers through generically — safe for every route, since only file-content responses set them.
+  2. **No way to fetch one document's activity.** `ActivityEvent.document_id` existed on the model with no query path exposed — `GET /dashboard/activity` had no `documentId` filter. Added an optional `documentId` query param to that existing endpoint (repository, service, router), reusing the same schema rather than adding a new endpoint.
+  - Completed: 2026-07-23
+- **Real bug found via browser testing: the BFF proxy crashed on any 204 No Content response.** The Fetch spec forbids passing a body (even an empty `ArrayBuffer`) to the `Response` constructor alongside a null-body status (204/205/304) — `DELETE /documents/{id}` was the *first* 204 response this proxy ever had to forward (every prior phase only used GET/POST/PATCH-with-body), so the bug was latent since Phase 4.1 and only surfaced now. Fixed by passing `null` as the body for 204/205/304 statuses. Found because Delete genuinely 500'd in the browser despite the backend correctly returning 204 — traced via the Next.js dev server's own error log, not just the browser console.
+  - Completed: 2026-07-23
+- **`/documents/[id]`** — header (title, file-type icon, version badge, `ReviewStatusBadge`), role-gated action bar (Download — owner/Reviewer/Admin via `_assert_can_edit`'s exact rule mirrored client-side; Mark as reviewed — Reviewer/Admin only; Edit — owner or Reviewer/Admin; Delete — owner or Admin only, *not* Reviewer, matching `_assert_can_delete` exactly), three tabs (Overview/Versions/Activity) per §6.5.
+  - Completed: 2026-07-23
+- **Overview tab** — `DocumentPreview` (PDF/text/image inline via `<iframe>`/`<img>` pointed at the BFF content URL with `disposition=inline`, mirroring the backend's own inline-eligibility rule so we never request inline for a type the server would force to `attachment`; anything else falls back to a file-type card + Download) and `MetadataPanel`, which becomes `EditMetadataForm` in place when editing — reuses `TagInput` from Upload rather than a new tag editor.
+  - Completed: 2026-07-23
+  - Notes: PDF preview couldn't be visually confirmed inside headless-Chromium screenshots — Playwright's bundled Chromium doesn't ship an active PDF-viewer plugin in headless mode, so the iframe renders blank there. Verified correctness a different way instead: fetched the exact inline URL directly and confirmed a valid 5-page PDF with `content-disposition: inline` and `content-type: application/pdf` — the real gap was environmental (headless testing), not the app. Renders normally in any real browser (Chrome, Edge, Firefox, Safari all have native PDF-in-iframe support).
+- **Versions tab (read-only this phase)** — version table (number + Current badge, uploader, date, size, change note, Download). Restore-this-version and Upload-new-version are Phase 4.6's actions, per the module order — not built yet, intentionally.
+  - Completed: 2026-07-23
+- **Activity tab** — reuses the Dashboard's `ActivityFeedItem` against the newly-added `documentId`-filtered `GET /dashboard/activity`.
+  - Completed: 2026-07-23
+- **Mark as reviewed** — dialog with an optional note, `POST /documents/{id}/reviews`, success toast names the new due date per §6.7's exact copy.
+  - Completed: 2026-07-23
+- **Delete with Undo** — soft-delete via `ConfirmDialog` (reused from Phase 4.1, not rebuilt), success toast with an "Undo" action that calls `POST /documents/{id}/restore`, redirects to the Explorer.
+  - Completed: 2026-07-23
+- **404/error states** — `GET /documents/{id}` returning `NotFoundError` already carries the exact §6.5 copy ("This document doesn't exist or was deleted.") from the backend, so the page just displays `error.message` rather than hardcoding it a second time, plus a "Back to Documents" link.
+  - Completed: 2026-07-23
+  - Notes: Verified end-to-end with headless-Chromium Playwright: view → edit → save, mark-as-reviewed with note, Versions tab (Current badge, download), Activity tab (all real events including the test's own trash/restore cycles, proving the audit trail is genuine), 404 state for a bogus ID, soft-delete → redirect → toast → Undo → document accessible again, and an Employee persona correctly missing Mark-as-reviewed/Edit for a document they don't own. Zero console errors beyond expected 404s/401 from the deliberately-bogus-ID and post-logout test steps. Test-induced description clutter and Supabase network-latency-driven flakiness in early test runs were both diagnosed and aren't real bugs (see notes above and §10). TypeScript, ESLint, and `next build` all clean.
+
 ---
 
 ## 4. Pending Features
 
 ### High Priority
 
-- Document Details UI — overview/versions/activity tabs (S5–S7), next up
+- Version History actions (S6, Phase 4.6) — restore-this-version and upload-new-version on the Versions tab, next up
 
 ### Medium Priority
 
 - Automated backend test suite (`pytest`) — unit tests for permission checks, version allocation, search ranking; one integration test covering the full upload→version→search→download loop (roadmap Phase 6)
-- Signed/short-lived-token URL for file download/preview links (browsers can't attach an `Authorization` header to a plain `<a href>`, so the BFF proxy's documented exception needs to be built)
 - Pending Reviews UI, Trash UI, Categories/Tags admin UI (S6–S9)
 - Settings screen (S10)
 
@@ -281,7 +305,9 @@ DocBrain/
     │   │   ├── (app)/
     │   │   │   ├── layout.tsx       # sidebar + topbar shell
     │   │   │   ├── page.tsx         # dashboard (Phase 4.2 — real widgets, not a placeholder)
-    │   │   │   └── documents/page.tsx  # Explorer (Phase 4.3) — Suspense-wrapped (useSearchParams)
+    │   │   │   └── documents/
+    │   │   │       ├── page.tsx     # Explorer (Phase 4.3) — Suspense-wrapped (useSearchParams)
+    │   │   │       └── [id]/page.tsx  # Document Details (Phase 4.5) — header, tabs, edit mode
     │   │   └── api/
     │   │       ├── auth/login/route.ts    # sets the httpOnly session cookie
     │   │       ├── auth/logout/route.ts   # clears it
@@ -292,23 +318,27 @@ DocBrain/
     │   │   ├── shared/               # PageHeader, EmptyState, ErrorState, ReviewStatusBadge,
     │   │   │                        # FileTypeIcon, UserAvatar, ConfirmDialog, KpiCard,
     │   │   │                        # DocumentListItem, ActivityFeedItem, SearchBox,
-    │   │   │                        # PaginationBar, UploadDropzone
+    │   │   │                        # PaginationBar, UploadDropzone, DownloadLink
     │   │   └── providers/           # QueryProvider, ThemeProvider
     │   ├── features/
     │   │   ├── auth/                # types.ts, api.ts, hooks.ts, components/login-form.tsx
     │   │   ├── taxonomy/            # types.ts, api.ts, hooks.ts (categories + tags, list-only —
     │   │   │                        #   full CRUD lands with the admin screens in 4.7/4.8)
-    │   │   ├── documents/           # types.ts, api.ts (list + create w/ XHR progress), hooks.ts,
+    │   │   ├── documents/           # types.ts, api.ts (list/get/update/delete/restore/
+    │   │   │                        #   markReviewed/listVersions/create w/ XHR progress), hooks.ts,
     │   │   │                        # components/ (DocumentFilters, DocumentsTable,
     │   │   │                        #   DocumentsMobileList, TagFilterCombobox, TagInput,
-    │   │   │                        #   UploadDocumentDialog — lazy-loaded from the topbar)
+    │   │   │                        #   UploadDocumentDialog, DocumentHeader, DocumentPreview,
+    │   │   │                        #   MetadataPanel, EditMetadataForm, MarkReviewedDialog,
+    │   │   │                        #   VersionsTab, DocumentActivityTab)
     │   │   └── dashboard/           # types.ts, api.ts, hooks.ts,
     │   │                            # components/ (KpiSection, CategoryDistribution,
     │   │                            #   DocumentListCard, ActivityFeed, PendingReviewsBanner,
     │   │                            #   WidgetSkeleton)
     │   │                            # (remaining features' api layers get built in their own phase)
     │   ├── lib/
-    │   │   ├── api-client.ts        # typed fetch wrapper + ApiError, targets /api/bff
+    │   │   ├── api-client.ts        # typed fetch wrapper + ApiError, targets /api/bff;
+    │   │   │                        # getVersionContentUrl() for downloads/previews
     │   │   ├── constants.ts         # TOKEN_COOKIE, API_BASE_URL
     │   │   ├── format.ts            # getInitials(), formatRelativeTime(), getReviewStatus(),
     │   │   │                        # formatFileSize()
@@ -318,8 +348,9 @@ DocBrain/
     │   └── types/
     │       ├── api.ts               # UserRole, ApiErrorBody, PagedResponse<T>
     │       └── document.ts          # ReviewStatus, CategorySummary, TagSummary,
-    │                                 # VersionSummary, DocumentSummary, DocumentDetail —
-    │                                 # shared across dashboard/Explorer/Upload/Details
+    │                                 # VersionSummary, DocumentSummary, DocumentDetail,
+    │                                 # VersionDetail — shared across dashboard/Explorer/
+    │                                 # Upload/Details
     └── public/
 ```
 
@@ -389,15 +420,16 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 | Versions | ✅ | ✅ | ✅ | Upload, download, restore |
 | Taxonomy | ✅ | ✅ | ✅ | Categories + Tags, admin-only mutations |
 | Reviews | ✅ | ✅ | ✅ | Pending queue, mark-reviewed |
-| Dashboard | ✅ | ✅ | ✅ | Summary + activity feed |
+| Dashboard | ✅ | ✅ | ✅ | Summary + activity feed, now with an optional `documentId` filter (added 2026-07-23 for the Details page's Activity tab) |
 
 - **Middleware:** CORS, correlation-ID (`X-Correlation-Id` on every request/response).
 - **Wire format:** camelCase JSON in and out (`app/schemas/base.py`'s `CamelModel`, plus `alias=` on non-path `Query`/`Form` params) — matches architecture doc §8 exactly. Fixed 2026-07-23; previously the implementation was snake_case despite the doc specifying camelCase. Internal Python code is unaffected (still snake_case attributes/kwargs).
 - **Authentication:** JWT (HS256), `HTTPBearer` security scheme (Swagger `/docs` shows one "Authorize" button).
 - **File upload:** temp-write → DB commit → atomic move protocol; extension allowlist + magic-byte MIME sniffing; 25MB cap; UUID-based storage paths (never user input).
+- **File download:** no signed-URL scheme needed after all — the BFF proxy's httpOnly-cookie-to-Bearer-header translation already covers plain browser navigation (same-origin request, cookie sent automatically). Corrected an earlier assumption to the contrary; see §9/§10.
 - **Versioning:** row-locked version-number allocation; append-only; restore creates a new version rather than rewriting history.
 - **Search:** Postgres full-text (`tsvector` + `ts_rank_cd`), trigger-maintained, weighted title > tags > description > category/filename. **Does not** yet index document body content (PDF/DOCX text) — see Pending Features.
-- **Pending for backend:** automated test suite (Phase 6), BFF-adjacent signed download URLs (frontend-side concern once built).
+- **Pending for backend:** automated test suite (Phase 6).
 
 ---
 
@@ -410,12 +442,12 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 | Dashboard | ✅ Done — KPIs, category distribution, recently-added/accessed, expiring-soon, role-gated pending-reviews banner, activity feed, all live-data |
 | Upload | ✅ Done — drag-and-drop dropzone, creatable tag input, RHF+Zod metadata form, determinate progress bar (XHR), non-dismissible mid-upload, client-side pre-validation, topbar button wired |
 | Explorer | ✅ Done — URL-driven filters (search/category/review-status/tags/sort), table + mobile list, pagination, empty/error/loading states, topbar search wired up |
-| Document Details | ⬜ Not started (dashboard/Explorer rows already link to `/documents/{id}`, which 404s until Phase 4.5 — same forward-dependency pattern already documented) |
-| Version History | ⬜ Not started |
+| Document Details | ✅ Done — header/action bar (role-gated), Overview tab with inline edit, Versions tab (read-only), Activity tab, PDF/image/text preview, mark-as-reviewed, delete-with-undo, 404 state |
+| Version History | 🟨 Read-only version table done (Phase 4.5); restore-this-version and upload-new-version are Phase 4.6 |
 | Search | ✅ Done — full-text search via the Explorer's search box (in-page, debounced) and the topbar's global search box (submit-triggered, from anywhere in the app) |
-| Responsive Design | ✅ Verified for the shell, Dashboard, Explorer, and now the Upload dialog (scrolls internally on short viewports rather than overflowing) |
+| Responsive Design | ✅ Verified for the shell, Dashboard, Explorer, Upload dialog, and now Document Details |
 
-**What exists:** Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + shadcn/ui (Base UI primitives) + TanStack Query + React Hook Form + Zod + next-themes, fully wired: design tokens, API layer, BFF proxy, auth guard, login, app shell, a live Dashboard, a live Document Explorer, and a live Upload flow all working end-to-end — verified with headless-Chromium Playwright scripts (shell: 10-step flow; dashboard: full-content check across Admin/Employee personas, dark mode, tablet, mobile; Explorer: filters, pagination, row navigation, empty state, mobile layout; Upload: a real file upload through the full form, progress bar, success toast, cache invalidation confirmed via the Dashboard's activity feed, and a rejected invalid file type), not just code review. Production build (`next build`) succeeds cleanly; TypeScript and ESLint are both clean.
+**What exists:** Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + shadcn/ui (Base UI primitives) + TanStack Query + React Hook Form + Zod + next-themes, fully wired: design tokens, API layer, BFF proxy, auth guard, login, app shell, a live Dashboard, a live Document Explorer, a live Upload flow, and a live Document Details page all working end-to-end — verified with headless-Chromium Playwright scripts (shell: 10-step flow; dashboard: full-content check across Admin/Employee personas, dark mode, tablet, mobile; Explorer: filters, pagination, row navigation, empty state, mobile layout; Upload: a real file upload through the full form, progress bar, success toast, cache invalidation; Details: view/edit/save, mark-as-reviewed, versions, activity, 404, soft-delete-with-undo, role-gating), not just code review. Production build (`next build`) succeeds cleanly; TypeScript and ESLint are both clean.
 
 ---
 
@@ -452,6 +484,10 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 - **2026-07-23** — Document upload (`documentsApi.create`) uses `XMLHttpRequest` instead of `fetch` — `fetch` has no cross-browser API for observing upload progress, and the architecture doc requires a determinate progress bar with byte count. The BFF proxy needed zero changes since it already forwards multipart bodies transparently.
 - **2026-07-23** — `TagInput` (Upload's creatable tag field) is a separate component from the Explorer's `TagFilterCombobox`, not a shared one — they operate on different data (tag names vs. tag IDs) and different semantics (create-on-the-fly vs. filter-existing-only). Built as a plain controlled dropdown rather than `Popover`/`Command`, since those toggle open on trigger click, which conflicts with keeping a list open while the user types.
 - **2026-07-23** — Client-side upload validation (extension allowlist, 25MB size cap) mirrors the backend's `core/config.py` defaults in `lib/upload-constants.ts` — same "instant feedback, backend remains the real authority" pattern already established for `getReviewStatus()`.
+- **2026-07-23** — No signed/short-lived-token URL scheme built for file downloads, correcting an assumption made earlier in this file. The BFF proxy already makes plain `<a href="/api/bff/...">` links work: same-origin requests carry the httpOnly session cookie automatically, and the proxy turns that into the Bearer header FastAPI needs. The only real fix needed was forwarding `Content-Disposition`/`X-Content-Type-Options` through the proxy, which it wasn't doing.
+- **2026-07-23** — `GET /dashboard/activity` grew an optional `documentId` filter rather than a new per-document-activity endpoint — reuses the existing schema/repository/router, since Document Details' Activity tab needs exactly the same shape the Dashboard already returns, just scoped to one document.
+- **2026-07-23** — Document Details' Versions tab is read-only this phase (Download only); restore-this-version and upload-new-version are deliberately deferred to Phase 4.6 (Version History) per the module order, not an oversight.
+- **2026-07-23** — `DocumentPreview`'s inline-vs-fallback decision (`isPreviewable()`) hard-mirrors the backend's own `_resolve_disposition` eligibility list (`versions/router.py`: `application/pdf`, `text/plain`, any `image/*`) — the frontend must never attempt an inline preview for a type the backend would force to `attachment` anyway.
 
 ---
 
@@ -469,22 +505,24 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 - ~~Dashboard's `/documents?categoryId=…` and `/documents?reviewStatus=…` links 404'd because the Explorer didn't exist yet~~ — resolved by building the Explorer (Phase 4.3); those links now work exactly as designed.
 - ~~Explorer's Category/Review Status/Sort selects displayed raw values (`"all"`, `"updated_at"`) instead of labels~~ — Base UI's `Select.Value` needed an explicit label-lookup render function (see Known Issues → Resolved and §9). Found via browser testing, fixed 2026-07-23.
 - ~~Topbar's Upload button was a disabled placeholder~~ — resolved by building the Upload flow (Phase 4.4); it now opens a working upload dialog from anywhere in the app.
+- ~~Document row/card links pointed at `/documents/{id}`, which didn't exist yet~~ — resolved by building Document Details (Phase 4.5); those links now work as designed.
+- ~~**The BFF proxy crashed (500) on any 204 No Content response**~~ — the Fetch spec forbids a body (even an empty `ArrayBuffer`) on a null-body-status `Response` (204/205/304). Latent since Phase 4.1 (nothing had proxied a 204 through the generic route until `DELETE /documents/{id}` in Phase 4.5); fixed by passing `null` as the body for those statuses. Found via browser testing — the backend correctly returned 204, but the client saw a 500 — traced through the Next.js dev server's own error log.
+- ~~**Downloads were assumed to need a signed/short-lived-token URL**~~ (see the entry directly below and §9) — they didn't; the real gap was two response headers the BFF proxy wasn't forwarding. Fixed 2026-07-23.
 
 ### Open
 
 - **No automated test suite.** All backend verification so far has been manual (curl + direct DB queries); the frontend has ad hoc Playwright smoke scripts (not checked into the repo — live in the session scratchpad) rather than a real test suite. Thorough, but not regression-proof. Formal `pytest`/component-test suites are Phase 6 in the roadmap, not yet started.
 - **Dashboard's "Recently Accessed" widget shows `updatedAt`, not a true "last accessed" timestamp.** `GET /dashboard/summary` returns `DocumentSummary` objects, which don't include `lastAccessedAt` (only `DocumentDetail` does, via the document-detail endpoint). Not worth a backend schema change for one dashboard widget's label right now — revisit if it's noticeably confusing in practice.
-- **Document row/card links point at `/documents/{id}`, which doesn't exist yet.** Intentional forward-dependency (Details is Phase 4.5) — clicking a document from the Dashboard, Explorer, or the Upload success toast's "View document" action 404s until that phase lands.
 - **Upload progress reflects the browser→Next.js leg only, not Next.js→FastAPI.** The BFF proxy buffers the full response before returning it, so true end-to-end progress isn't observable from the client — acceptable on localhost where that second leg is fast; worth revisiting if the backend is ever deployed somewhere with meaningfully higher latency between the two.
-- **Browser can't directly download files via a plain link.** `GET /versions/{n}/content` requires a Bearer token; a plain `<a href>` in a browser won't attach one. The architecture doc already flags this as the one deliberate exception to the BFF-proxies-everything pattern (§10.2) — needs a signed/short-lived-token URL or signed cookie once the frontend is built. Not a bug, but not yet solved either.
 - **Search doesn't cover document body text.** `search_vector` indexes title, description, tags, category name, and current filename — not the actual PDF/DOCX content (FR-22, deferred).
 - **No duplicate-upload detection.** SHA-256 checksums are computed and stored per version, but nothing checks "does this content already exist?" and warns the user (FR-21, deferred).
+- **PDF preview can't be visually verified in headless-Chromium Playwright testing** — the bundled headless Chromium has no active PDF-viewer plugin, so the iframe renders blank in automated screenshots even though the underlying response is a valid PDF with correct headers (verified by fetching the URL directly). Not a product bug — renders normally in every real browser — but means this one feature's visual correctness relies on the direct-fetch check rather than a screenshot, worth remembering if it's ever re-verified.
 
 ---
 
 ## 11. Next Immediate Tasks
 
-1. Build Document Details + Version History (S5–S6, Phases 4.5–4.6), next up — makes the Dashboard's, Explorer's, and Upload success toast's `/documents/{id}` links resolve instead of 404ing. The metadata edit-mode side panel can reuse `TagInput` from Upload.
+1. Build Version History actions (S6, Phase 4.6), next up — restore-this-version (with the explicit two-version consequence dialog §6.6 requires) and upload-new-version on the Versions tab already built in 4.5. `UploadDropzone` from Upload is reusable for the new-version file picker.
 
 ---
 
@@ -513,6 +551,7 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 
 ### 2026-07-23
 
+- Completed **Phase 4.5 (Document Details)** — header/role-gated action bar, Overview tab with inline edit mode (reusing `TagInput` from Upload), a read-only Versions tab, an Activity tab, PDF/image/text preview, mark-as-reviewed, and delete-with-undo. Found and fixed two real architectural gaps before implementing: (1) corrected an earlier assumption that downloads needed a signed-URL scheme — they don't, the BFF proxy's cookie-to-Bearer translation already covers plain links; the actual fix was forwarding `Content-Disposition`/`X-Content-Type-Options` through the generic proxy, which it was silently dropping; (2) added an optional `documentId` filter to the existing `GET /dashboard/activity` endpoint for the Activity tab, reusing the schema rather than adding a new route. Also found and fixed a **real, previously-latent bug via browser testing**: the BFF proxy crashed with a 500 on any 204 No Content response (the Fetch spec forbids a body on null-body-status Responses) — `DELETE /documents/{id}` was the first 204 this proxy ever had to forward, so the bug had been dormant since Phase 4.1. Verified end-to-end with headless-Chromium Playwright: view→edit→save, mark-as-reviewed, versions table, activity feed (including the test's own trash/restore cycle, proving the audit trail is genuine), a 404 state, soft-delete→redirect→toast→Undo→restored, and Employee-role gating. PDF preview correctness was confirmed by fetching the content URL directly (valid 5-page PDF, correct headers) rather than a screenshot, since headless Chromium has no PDF-viewer plugin — not a product bug. TypeScript, ESLint, and `next build` all clean.
 - Completed **Phase 4.4 (Upload Document)** — a single unified upload modal per architecture doc §6.3 (correcting my own earlier "two-step stepper" mischaracterization), built from a new `UploadDropzone` (shared) and `TagInput` (creatable, distinct from the Explorer's filter-only `TagFilterCombobox`). `documentsApi.create()` uses `XMLHttpRequest` for a real determinate progress bar (`fetch` can't observe upload progress). Non-dismissible mid-upload via a single `onOpenChange` guard that covers Escape/outside-click/close-button/Cancel uniformly. Client-side extension/size pre-validation mirrors the backend's `core/config.py` defaults. Topbar's Upload button is now fully wired (both topbar buttons — search and upload — are live as of this phase). Verified end-to-end with headless-Chromium Playwright using a real file upload: validation-disabled submit button, auto-filled title, category selection, tag creation (existing + brand-new), progress bar, success toast, dialog auto-close, the new document appearing in the Explorer and the Dashboard's activity feed (cache invalidation confirmed, not assumed), and a rejected unsupported file type — zero console errors. Test artifacts deleted afterward via the API so the seed corpus stays at its documented 53-document baseline. TypeScript, ESLint, and `next build` all clean.
 - Completed **Phase 4.3 (Document Explorer)** — `documentsApi` + `taxonomyApi` feature modules, URL-driven filter state (search/category/review-status/tags/sort/page — the same query params the Dashboard already links to), a debounced `SearchBox` and `PaginationBar` (new shared components), a `TagFilterCombobox`, a desktop `DocumentsTable` collapsing to a mobile stacked list below `lg`, and the topbar's search box wired up for real. Verified end-to-end with headless-Chromium Playwright: filters, pagination, row navigation, empty state for a nonsense query, and mobile layout — zero console errors except the expected 404 from clicking into `/documents/{id}` (Phase 4.5, not yet built). Found and fixed one real Base UI gotcha along the way — `Select.Value` needs an explicit label-lookup render function; it doesn't auto-derive labels from `SelectItem` children like Radix does. TypeScript, ESLint, and `next build` all clean.
 - Completed **Phase 4.2 (Dashboard)** — `dashboardApi` feature module, KPI section, role-gated Pending Reviews banner, Documents by Category bar chart, Recently Added / Recently Accessed / Expiring Soon (one generic `DocumentListCard`, not three duplicates), and a Recent Activity feed, all consuming the live `GET /dashboard/summary` and `GET /dashboard/activity` endpoints. New shared types (`src/types/document.ts`) and shared components (`KpiCard`, `DocumentListItem`, `ActivityFeedItem`) built for reuse by the Explorer and Document Details phases. Verified end-to-end with headless-Chromium Playwright scripts across an Admin persona (all widgets + banner visible) and an Employee persona (banner and admin-only nav correctly hidden), plus dark mode, tablet, and mobile viewports — zero console errors after fixing one real Base UI warning (`nativeButton={false}` needed when rendering `Button` as a `Link`). TypeScript, ESLint, and `next build` all clean.
