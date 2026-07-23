@@ -1,7 +1,9 @@
+import uuid
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import User
+from app.db.models import User, UserPreference
 
 
 class AuthRepository:
@@ -15,3 +17,9 @@ class AuthRepository:
     def get_by_email(self, email: str) -> User | None:
         stmt = select(User).where(User.email == email)
         return self.db.scalar(stmt)
+
+    def get_preferences(self, user_id: uuid.UUID) -> UserPreference | None:
+        return self.db.get(UserPreference, user_id)
+
+    def add_preferences(self, preferences: UserPreference) -> None:
+        self.db.add(preferences)

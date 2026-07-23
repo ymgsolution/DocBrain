@@ -4,9 +4,10 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import get_current_user
 from app.db.models import User
 from app.db.session import get_db_session
+from app.db.models import UserPreference
 from app.modules.auth.repository import AuthRepository
 from app.modules.auth.service import AuthService
-from app.schemas.auth import LoginRequest, TokenResponse, UserSummary
+from app.schemas.auth import LoginRequest, TokenResponse, UserPreferencesOut, UserPreferencesUpdate, UserSummary
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -34,3 +35,22 @@ def me(current_user: User = Depends(get_current_user)) -> User:
 @router.post("/logout", status_code=204)
 def logout() -> None:
     return None
+
+
+@router.get("/me/preferences", response_model=UserPreferencesOut)
+def get_my_preferences(
+    current_user: User = Depends(get_current_user),
+    service: AuthService = Depends(get_auth_service),
+) -> UserPreference:
+    return service.get_preferences(current_user)
+
+
+@router.patch("/me/preferences", response_model=UserPreferencesOut)
+def update_my_preferences(
+    payload: UserPreferencesUpdate,
+    current_user: User = Depends(get_current_user),
+    service: AuthService = Depends(get_auth_service),
+) -> UserPreference:
+    return service.update_preferences(
+        current_user, theme=payload.theme, default_page_size=payload.default_page_size
+    )

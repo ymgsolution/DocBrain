@@ -1,9 +1,9 @@
 import uuid
 from datetime import datetime
 
-from pydantic import EmailStr
+from pydantic import EmailStr, Field
 
-from app.db.models.enums import UserRole
+from app.db.models.enums import ThemePreference, UserRole
 from app.schemas.base import CamelModel
 
 
@@ -22,3 +22,13 @@ class TokenResponse(CamelModel):
     token: str
     expires_at: datetime
     user: UserSummary
+
+
+class UserPreferencesOut(CamelModel):
+    theme: ThemePreference
+    default_page_size: int
+
+
+class UserPreferencesUpdate(CamelModel):
+    theme: ThemePreference | None = None
+    default_page_size: int | None = Field(default=None, ge=1, le=100)
