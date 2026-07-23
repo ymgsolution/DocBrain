@@ -20,3 +20,12 @@ export interface PagedDocuments {
   total: number;
   totalPages: number;
 }
+
+export interface DocumentCreatePayload {
+  file: File;
+  title: string;
+  categoryId: string;
+  description?: string;
+  tags: string[];
+  reviewDueDate?: string;
+}
