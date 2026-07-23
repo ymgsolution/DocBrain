@@ -17,12 +17,16 @@ export interface NavItem {
   roles?: UserRole[]; // omitted = visible to everyone
 }
 
+// Shared with the dashboard's pending-reviews banner so both surfaces gate
+// on the exact same roles.
+export const REVIEWER_ROLES: UserRole[] = ["REVIEWER", "ADMIN"];
+
 // Data-driven so a future nav item (e.g. an "AI Insights" module) is a
 // one-line addition here, not a restructure of the sidebar component.
 export const PRIMARY_NAV: NavItem[] = [
   { label: "Dashboard", href: "/", icon: LayoutDashboard },
   { label: "Documents", href: "/documents", icon: FileText },
-  { label: "Pending Reviews", href: "/reviews", icon: ClipboardCheck, roles: ["REVIEWER", "ADMIN"] },
+  { label: "Pending Reviews", href: "/reviews", icon: ClipboardCheck, roles: REVIEWER_ROLES },
   { label: "Trash", href: "/trash", icon: Trash2 },
 ];
 
