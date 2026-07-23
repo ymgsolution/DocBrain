@@ -2,7 +2,7 @@
 
 > **This is the single source of truth for the project.** It must be updated whenever a feature is added, modified, refactored, removed, or completed. See [Important Rules](#important-rules) at the bottom.
 
-**Last updated:** 2026-07-23 (Phase 4.7 — Categories Admin)
+**Last updated:** 2026-07-23 (Phase 4.8 — Tags Admin)
 
 ---
 
@@ -29,7 +29,7 @@ Full architecture rationale lives in [docs/DOCBRAIN-ARCHITECTURE.md](docs/DOCBRA
 - ✅ Backend Foundation
 - ✅ Backend APIs (all modules from §9.1 of the architecture doc are built and manually verified)
 - 🟨 Testing (extensive manual/curl verification done per-feature on the backend; browser-driven Playwright smoke test done for the shell; no automated `pytest`/component-test suite yet — that's Phase 6 in the roadmap)
-- 🟨 Frontend (Phase 4.1 — Application Shell — complete. Phase 4.2 — Dashboard — complete. Phase 4.3 — Document Explorer — complete. Phase 4.4 — Upload Document — complete. Phase 4.5 — Document Details — complete. Phase 4.6 — Version History — complete. Phase 4.7 — Categories Admin — complete: table with usage counts, New/Edit/Archive/Unarchive, Delete disabled-with-tooltip while in use, the app's first 403 (`ForbiddenState`) for non-Admins hitting the route directly. Verified end-to-end in a real browser. Phases 4.8–4.9 — Tags, Settings — not started)
+- 🟨 Frontend (Phase 4.1 — Application Shell — complete. Phase 4.2 — Dashboard — complete. Phase 4.3 — Document Explorer — complete. Phase 4.4 — Upload Document — complete. Phase 4.5 — Document Details — complete. Phase 4.6 — Version History — complete. Phase 4.7 — Categories Admin — complete. Phase 4.8 — Tags Admin — complete: table sorted by usage, Rename, Merge-into with an affected-document-count dialog, Delete disabled-with-tooltip while in use. Every module through S9 in the original screen plan is now built. Verified end-to-end in a real browser. Phase 4.9 — Settings — not started, the last item in Phase 4)
 - ⬜ Deployment
 
 ---
@@ -244,19 +244,28 @@ Full architecture rationale lives in [docs/DOCBRAIN-ARCHITECTURE.md](docs/DOCBRA
   - Completed: 2026-07-23
   - Notes: The disabled Delete button is wrapped in a `<span tabIndex={0}>` as the actual `TooltipTrigger`, not the button itself — disabled native elements don't reliably fire the hover events a tooltip needs. Verified end-to-end with headless-Chromium Playwright: create → edit → archive → unarchive → delete-blocked-with-tooltip on an in-use seed category (confirmed via the span-hover, not the inert button) → delete-allowed on a throwaway unused category → 403 for a non-Admin persona hitting the URL directly, with the sidebar correctly showing no Categories link for them at all. Category count confirmed back at the documented baseline (12) after cleanup. TypeScript, ESLint, and `next build` all clean.
 
+### Frontend — Tags Admin (Phase 4.8)
+
+- **`tagsApi` gains rename/merge/delete** (previously list-only). Mutations invalidate the same `taxonomyKeys.tags` cache key `TagInput` (Upload/Edit) and `TagFilterCombobox` (Explorer) already read — a rename or merge here is reflected in those pickers automatically, with zero extra invalidation code.
+  - Completed: 2026-07-23
+- **`/admin/tags`** — table sorted by usage (the backend already returns `usage_count desc, name asc`, matching §6.9's "sorted by usage" with no client-side sort needed), Rename via `RenameTagDialog`, Merge-into via `MergeTagDialog`, Delete disabled-with-tooltip while `usageCount > 0` — same precheck/tooltip pattern established in Categories (4.7), reused rather than re-derived. No "New tag" button — §6.9 only lists Rename/Merge/Delete for Tags (tags are created implicitly through `TagInput`, never directly here).
+  - Completed: 2026-07-23
+- **Merge confirmation states the affected document count** using the tag's already-known `usageCount` ("Used by N document(s) — they'll be re-tagged with the target tag instead"), satisfying §6.9's requirement without a new backend endpoint to preview the merge.
+  - Completed: 2026-07-23
+  - Notes: Verified end-to-end with headless-Chromium Playwright using two throwaway tags created via a throwaway document's `TagInput` (never the seed vocabulary): rename, merge into a second tag (toast correctly reported "1 document(s) updated," confirming the backend's already-tagged dedup logic works, not a naive double-insert), delete-blocked-with-tooltip while in use, removed the tag from the document to free it to usage=0, then delete-allowed succeeded, and 403 for a non-Admin persona. Tag count and seed document count both confirmed back at their documented baselines (30 tags, 53 documents) after cleanup. TypeScript, ESLint, and `next build` all clean.
+
 ---
 
 ## 4. Pending Features
 
 ### High Priority
 
-- Tags admin UI (S9, Phase 4.8), next up
+- Settings screen (S10, Phase 4.9), next up — the last item in Phase 4
 
 ### Medium Priority
 
 - Automated backend test suite (`pytest`) — unit tests for permission checks, version allocation, search ranking; one integration test covering the full upload→version→search→download loop (roadmap Phase 6)
-- Pending Reviews UI, Trash UI (S6, S8)
-- Settings screen (S10)
+- Pending Reviews UI, Trash UI (S6, S8) — lower priority than originally-scoped Phase 4, deferred alongside the rest of Phase 5/6 polish
 
 ### Low Priority
 
@@ -329,7 +338,8 @@ DocBrain/
     │   │   │   │   ├── page.tsx     # Explorer (Phase 4.3) — Suspense-wrapped (useSearchParams)
     │   │   │   │   └── [id]/page.tsx  # Document Details (4.5) + Version History (4.6)
     │   │   │   └── admin/
-    │   │   │       └── categories/page.tsx  # Categories admin (Phase 4.7) — Admin-only, 403 guard
+    │   │   │       ├── categories/page.tsx  # Categories admin (Phase 4.7) — Admin-only, 403 guard
+    │   │   │       └── tags/page.tsx        # Tags admin (Phase 4.8) — rename/merge/delete
     │   │   └── api/
     │   │       ├── auth/login/route.ts    # sets the httpOnly session cookie
     │   │       ├── auth/logout/route.ts   # clears it
@@ -345,8 +355,9 @@ DocBrain/
     │   ├── features/
     │   │   ├── auth/                # types.ts, api.ts, hooks.ts, components/login-form.tsx
     │   │   ├── taxonomy/            # types.ts, api.ts (categories: list/create/update/delete;
-    │   │   │                        #   tags: list-only — full CRUD is Phase 4.8), hooks.ts,
-    │   │   │                        # components/CategoryFormDialog.tsx
+    │   │   │                        #   tags: list/rename/merge/delete), hooks.ts,
+    │   │   │                        # components/ (CategoryFormDialog, RenameTagDialog,
+    │   │   │                        #   MergeTagDialog)
     │   │   ├── documents/           # types.ts, api.ts (list/get/update/delete/restore/
     │   │   │                        #   markReviewed/listVersions/uploadVersion/restoreVersion/
     │   │   │                        #   create — all upload paths share an xhrUpload<T>() helper),
@@ -470,10 +481,11 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 | Version History | ✅ Done — version table, restore-this-version (with the two-version consequence dialog), upload-new-version, all role-gated |
 | Search | ✅ Done — full-text search via the Explorer's search box (in-page, debounced) and the topbar's global search box (submit-triggered, from anywhere in the app) |
 | Categories (Admin) | ✅ Done — table with usage counts, New/Edit/Archive/Unarchive, Delete disabled-with-tooltip while in use, 403 for non-Admins |
-| Tags (Admin) | ⬜ Not started |
-| Responsive Design | ✅ Verified for the shell, Dashboard, Explorer, Upload dialog, Document Details / Version History, and Categories admin |
+| Tags (Admin) | ✅ Done — table sorted by usage, Rename, Merge-into (with an affected-document-count dialog), Delete disabled-with-tooltip while in use, 403 for non-Admins |
+| Settings | ⬜ Not started — the last item in Phase 4 |
+| Responsive Design | ✅ Verified for the shell, Dashboard, Explorer, Upload dialog, Document Details / Version History, and Categories/Tags admin |
 
-**What exists:** Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + shadcn/ui (Base UI primitives) + TanStack Query + React Hook Form + Zod + next-themes, fully wired: design tokens, API layer, BFF proxy, auth guard, login, app shell, a live Dashboard, a live Document Explorer, a live Upload flow, a live Document Details + Version History page, and a live Categories admin screen all working end-to-end — verified with headless-Chromium Playwright scripts (shell: 10-step flow; dashboard: full-content check across Admin/Employee personas, dark mode, tablet, mobile; Explorer: filters, pagination, row navigation, empty state, mobile layout; Upload: a real file upload through the full form, progress bar, success toast, cache invalidation; Details: view/edit/save, mark-as-reviewed, activity, 404, soft-delete-with-undo, role-gating; Version History: upload-new-version, restore-this-version, both against a throwaway test document; Categories: create/edit/archive/unarchive/delete, delete-blocked tooltip, 403 for non-Admins), not just code review. Production build (`next build`) succeeds cleanly; TypeScript and ESLint are both clean.
+**What exists:** Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + shadcn/ui (Base UI primitives) + TanStack Query + React Hook Form + Zod + next-themes, fully wired: design tokens, API layer, BFF proxy, auth guard, login, app shell, a live Dashboard, a live Document Explorer, a live Upload flow, a live Document Details + Version History page, and live Categories/Tags admin screens all working end-to-end — verified with headless-Chromium Playwright scripts (shell: 10-step flow; dashboard: full-content check across Admin/Employee personas, dark mode, tablet, mobile; Explorer: filters, pagination, row navigation, empty state, mobile layout; Upload: a real file upload through the full form, progress bar, success toast, cache invalidation; Details: view/edit/save, mark-as-reviewed, activity, 404, soft-delete-with-undo, role-gating; Version History: upload-new-version, restore-this-version, both against a throwaway test document; Categories: create/edit/archive/unarchive/delete, delete-blocked tooltip, 403 for non-Admins; Tags: rename/merge/delete against throwaway tags, delete-blocked tooltip, 403 for non-Admins), not just code review. Production build (`next build`) succeeds cleanly; TypeScript and ESLint are both clean.
 
 ---
 
@@ -522,6 +534,9 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 - **2026-07-23** — Client-side Delete-disabled precheck for categories mirrors the backend's exact `ConflictError` condition (`documentCount > 0` in `taxonomy/service.py`) — same "instant feedback, backend remains authority" pattern as upload validation and review-status thresholds.
 - **2026-07-23** — Tooltips on disabled buttons need the hoverable element to be a wrapping `<span tabIndex={0}>`, not the disabled `<button>` itself — disabled native elements don't reliably fire the pointer/hover events Base UI's `Tooltip.Trigger` needs. First real usage of `Tooltip` in the app to hit this; worth remembering for any future disabled-button-with-tooltip.
 - **2026-07-23** — `ForbiddenState` (403) is a new shared component, not folded into `ErrorState` — a 403 is a permissions statement ("you can't be here"), semantically distinct from a 4xx/5xx failure ("something went wrong"), and future role-gated pages (Tags, Settings) will reuse it as-is.
+- **2026-07-23** — Tags admin has no "New tag" button, unlike Categories' `[New]` — §6.9 only lists Rename/Merge/Delete for Tags. Tags are created implicitly through `TagInput` when a document is uploaded or edited, never directly in this admin screen; adding a manual-create path would be scope creep beyond what the doc specifies.
+- **2026-07-23** — Merge-into's confirmation states the affected document count from the tag's already-known `usageCount` rather than a new backend "preview" call — the number doesn't change between opening the dialog and confirming, so a live round-trip would be unnecessary.
+- **2026-07-23** — Tag-rename/merge/delete mutations invalidate the same `taxonomyKeys.tags` cache key that `TagInput` and `TagFilterCombobox` already read (built in Phases 4.4/4.3) — a rename or merge in the admin screen is reflected in those pickers for free, no extra invalidation wiring needed.
 
 ---
 
@@ -557,7 +572,7 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 
 ## 11. Next Immediate Tasks
 
-1. Build the Tags admin screen (S9, Phase 4.8), next up — table sorted by usage, Rename, Merge-into (dialog stating how many documents are affected), Delete only at usage = 0. `ForbiddenState` and the delete-precheck pattern from Categories (4.7) both carry over directly.
+1. Build the Settings screen (S10, Phase 4.9), next up and the last item in Phase 4 — profile (read-only), theme toggle (already exists in the topbar; Settings likely just surfaces the same control), default page size preference. Check `user_preferences` table (§7) for what's already backed by schema before inventing new fields.
 
 ---
 
@@ -586,6 +601,7 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 
 ### 2026-07-23
 
+- Completed **Phase 4.8 (Tags Admin)** — `/admin/tags` per §6.9: table sorted by usage (backend already returns `usage_count desc, name asc`), Rename via `RenameTagDialog`, Merge-into via `MergeTagDialog` (confirmation states the affected document count from the tag's already-known `usageCount`, no new backend call needed), and Delete disabled-with-tooltip while `usageCount > 0` — reusing the exact precheck/tooltip/`ForbiddenState` patterns established in Categories (4.7) rather than re-deriving them. No "New tag" button, since §6.9 doesn't list one for Tags — they're created implicitly through `TagInput`. `tagsApi` grew rename/merge/delete (was list-only); mutations invalidate the same cache key `TagInput`/`TagFilterCombobox` already read, so those pickers see changes for free. This completes every module through S9 in the original screen plan — only Settings (S10, Phase 4.9) remains in Phase 4. Verified end-to-end with headless-Chromium Playwright using two throwaway tags on a throwaway document (never the seed vocabulary): rename, merge (toast correctly reported "1 document(s) updated," confirming the backend's already-tagged dedup logic, not a naive double-insert), delete-blocked-with-tooltip, freed the tag to usage=0 and confirmed delete then succeeded, and 403 for a non-Admin persona. Tag count (30) and document count (53) both confirmed back at their documented baselines after cleanup. TypeScript, ESLint, and `next build` all clean.
 - Completed **Phase 4.7 (Categories Admin)** — `/admin/categories` per §6.9: table (name, description, usage count, status), New/Edit via a shared `CategoryFormDialog`, one-click Archive/Unarchive as a separate action from Edit, and Delete disabled-with-tooltip while `documentCount > 0` (client-side precheck mirrors the backend's exact `ConflictError` condition). Built the app's first 403 state (`ForbiddenState`, new shared component, per §6.10's exact copy) since `/admin/categories` is reachable directly by URL even though the sidebar already hides its nav link from non-Admins. `categoriesApi` grew create/update/delete (was list-only since Phase 4.3); `useCategories()` gained an `includeArchived` param defaulting to `false` so the Explorer's existing filter dropdown is unaffected. Found one real cross-browser quirk along the way: a disabled `<button>` doesn't reliably fire the hover events `Tooltip.Trigger` needs, so the trigger has to be a wrapping `<span tabIndex={0}>` instead — the app's first real `Tooltip` usage to hit this. Verified end-to-end with headless-Chromium Playwright: create/edit/archive/unarchive/delete on a throwaway category, delete-blocked tooltip confirmed on a real in-use seed category, and 403 for a non-Admin persona with the sidebar correctly showing no Categories link at all. Category count confirmed back at the documented baseline (12) after cleanup. TypeScript, ESLint, and `next build` all clean.
 - Completed **Phase 4.6 (Version History)** — the two actions deliberately deferred from Phase 4.5: "Upload new version" added to the header's action bar (dropzone + required change note + determinate progress bar, lazy-loaded dialog) and "Restore this version" on every non-current Versions-tab row (reusing `ConfirmDialog`, confirmation names both version numbers per §6.6). Factored a shared `xhrUpload<T>()` helper out of the now-two call sites needing XMLHttpRequest-for-progress. This closes out Document Details / Version History (S5–S6) as originally scoped. Verified end-to-end with headless-Chromium Playwright against a throwaway test document — never the seed corpus, since `DocumentVersion` rows are append-only with no delete endpoint and would permanently inflate the seed's version counts: upload-new-version, restore, Current-badge/Restore-button visibility at every step, both activity events, and Employee-role gating. Confirmed the seed corpus's documented baseline (53 documents, 99 versions) was unaffected after cleanup. TypeScript, ESLint, and `next build` all clean.
 - Completed **Phase 4.5 (Document Details)** — header/role-gated action bar, Overview tab with inline edit mode (reusing `TagInput` from Upload), a read-only Versions tab, an Activity tab, PDF/image/text preview, mark-as-reviewed, and delete-with-undo. Found and fixed two real architectural gaps before implementing: (1) corrected an earlier assumption that downloads needed a signed-URL scheme — they don't, the BFF proxy's cookie-to-Bearer translation already covers plain links; the actual fix was forwarding `Content-Disposition`/`X-Content-Type-Options` through the generic proxy, which it was silently dropping; (2) added an optional `documentId` filter to the existing `GET /dashboard/activity` endpoint for the Activity tab, reusing the schema rather than adding a new route. Also found and fixed a **real, previously-latent bug via browser testing**: the BFF proxy crashed with a 500 on any 204 No Content response (the Fetch spec forbids a body on null-body-status Responses) — `DELETE /documents/{id}` was the first 204 this proxy ever had to forward, so the bug had been dormant since Phase 4.1. Verified end-to-end with headless-Chromium Playwright: view→edit→save, mark-as-reviewed, versions table, activity feed (including the test's own trash/restore cycle, proving the audit trail is genuine), a 404 state, soft-delete→redirect→toast→Undo→restored, and Employee-role gating. PDF preview correctness was confirmed by fetching the content URL directly (valid 5-page PDF, correct headers) rather than a screenshot, since headless Chromium has no PDF-viewer plugin — not a product bug. TypeScript, ESLint, and `next build` all clean.
