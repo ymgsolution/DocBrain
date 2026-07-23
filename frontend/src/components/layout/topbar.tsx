@@ -2,6 +2,7 @@
 
 import { Menu, Plus, Search } from "lucide-react";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -12,6 +13,14 @@ import { UserMenu } from "./user-menu";
 
 export function Topbar() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const router = useRouter();
+
+  function handleSearchSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!query.trim()) return;
+    router.push(`/documents?q=${encodeURIComponent(query.trim())}`);
+  }
 
   return (
     <header className="border-border bg-background/95 supports-backdrop-filter:bg-background/80 sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b px-4 backdrop-blur-sm">
@@ -31,13 +40,15 @@ export function Topbar() {
         </SheetContent>
       </Sheet>
 
-      <div className="relative hidden max-w-sm flex-1 sm:block">
+      <form onSubmit={handleSearchSubmit} className="relative hidden max-w-sm flex-1 sm:block">
         <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
-        <Tooltip>
-          <TooltipTrigger render={<Input placeholder="Search documents…" className="pl-8" disabled />} />
-          <TooltipContent>Coming in the Explorer phase</TooltipContent>
-        </Tooltip>
-      </div>
+        <Input
+          placeholder="Search documents…"
+          className="pl-8"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </form>
 
       <div className="flex flex-1 items-center justify-end gap-2">
         <Tooltip>
