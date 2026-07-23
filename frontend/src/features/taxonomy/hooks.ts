@@ -52,3 +52,31 @@ export function useDeleteCategory() {
     onSuccess: () => invalidateCategories(queryClient),
   });
 }
+
+function invalidateTags(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: taxonomyKeys.tags });
+}
+
+export function useRenameTag(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => tagsApi.rename(id, name),
+    onSuccess: () => invalidateTags(queryClient),
+  });
+}
+
+export function useMergeTag(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (targetTagId: string) => tagsApi.merge(id, targetTagId),
+    onSuccess: () => invalidateTags(queryClient),
+  });
+}
+
+export function useDeleteTag() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => tagsApi.delete(id),
+    onSuccess: () => invalidateTags(queryClient),
+  });
+}

@@ -26,3 +26,7 @@ export interface CategoryUpdatePayload {
   defaultReviewPeriodDays?: number;
   isArchived?: boolean;
 }
+
+export interface TagMergeResponse {
+  documentsUpdated: number;
+}
