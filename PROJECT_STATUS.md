@@ -2,7 +2,7 @@
 
 > **This is the single source of truth for the project.** It must be updated whenever a feature is added, modified, refactored, removed, or completed. See [Important Rules](#important-rules) at the bottom.
 
-**Last updated:** 2026-07-23 (Phase 4.2 — Dashboard)
+**Last updated:** 2026-07-23 (Phase 4.3 — Document Explorer)
 
 ---
 
@@ -29,7 +29,7 @@ Full architecture rationale lives in [docs/DOCBRAIN-ARCHITECTURE.md](docs/DOCBRA
 - ✅ Backend Foundation
 - ✅ Backend APIs (all modules from §9.1 of the architecture doc are built and manually verified)
 - 🟨 Testing (extensive manual/curl verification done per-feature on the backend; browser-driven Playwright smoke test done for the shell; no automated `pytest`/component-test suite yet — that's Phase 6 in the roadmap)
-- 🟨 Frontend (Phase 4.1 — Application Shell — complete. Phase 4.2 — Dashboard — complete: KPIs, category distribution, recently-added/accessed, expiring-soon, pending-reviews banner, activity feed, all working end-to-end in a real browser. Phases 4.3–4.9 — Explorer, Upload, Details, Version History, Categories, Tags, Settings — not started)
+- 🟨 Frontend (Phase 4.1 — Application Shell — complete. Phase 4.2 — Dashboard — complete. Phase 4.3 — Document Explorer — complete: URL-driven filters (search/category/review-status/tags/sort), table + mobile list, pagination, wired-up topbar search, all working end-to-end in a real browser. Phases 4.4–4.9 — Upload, Details, Version History, Categories, Tags, Settings — not started)
 - ⬜ Deployment
 
 ---
@@ -164,21 +164,38 @@ Full architecture rationale lives in [docs/DOCBRAIN-ARCHITECTURE.md](docs/DOCBRA
   - Completed: 2026-07-23
   - Notes: Found and fixed a real Base UI console warning via browser testing — `Button` rendered as a `Link` (`render={<Link .../>}`, used for "View all" / "Review now") needs `nativeButton={false}`, since Base UI's `Button` defaults to expecting a real `<button>` element. Verified zero console errors after the fix, across desktop/dark-mode/tablet/mobile, and across both an Admin persona (banner + all widgets visible) and an Employee persona (banner and Pending-Reviews nav item both correctly hidden).
 
+### Frontend — Document Explorer (Phase 4.3)
+
+- **`documentsApi` + `taxonomyApi` feature modules** — `features/documents/{types,api,hooks}.ts` (`GET /documents` with the full filter set) and `features/taxonomy/{types,api,hooks}.ts` (`GET /categories`, `GET /tags` — list-only for now; full CRUD lands with the admin screens in 4.7/4.8). `useDocuments()` uses TanStack Query's `placeholderData` to keep the previous page's rows on screen while a new page/filter loads, instead of flashing a skeleton on every pagination click.
+  - Completed: 2026-07-23
+- **URL-driven filter state** — every filter (`q`, `categoryId`, `tagId[]`, `reviewStatus`, `sort`, `page`) lives in the URL query string, not React state, parsed fresh from `useSearchParams()` on every render. This is why the Dashboard's `/documents?categoryId=…` and `/documents?reviewStatus=due_soon` links (built in Phase 4.2, dead until now) work correctly as entry points with no Explorer-side code aware of the Dashboard at all.
+  - Completed: 2026-07-23
+- **Filter bar** — debounced `SearchBox` (new shared component, 300ms, event-driven debounce via a ref'd timeout rather than an effect), Category select, Review Status select, `TagFilterCombobox` (Popover + Command, client-side filtered — the tag vocabulary is a few dozen entries, so one fetch-all beats a debounced per-keystroke server search), Sort select.
+  - Completed: 2026-07-23
+- **Results table** — desktop `DocumentsTable` (Title/Category/Owner/Version/Review/Updated columns, reusing `FileTypeIcon`/`UserAvatar`/`ReviewStatusBadge`), collapsing below `lg` to `DocumentsMobileList`, which reuses the `DocumentListItem` built for the Dashboard rather than a new mobile-specific row component.
+  - Completed: 2026-07-23
+- **`PaginationBar`** (new shared component) — Previous/Next + "Showing X–Y of Z", reusable by Trash/Pending Reviews/admin tables later.
+  - Completed: 2026-07-23
+- **Topbar search wired up** — previously a disabled placeholder ("Coming in the Explorer phase"); Enter now navigates to `/documents?q=…` from anywhere in the app. Deliberately submit-triggered, not debounce-live like the Explorer's own search box, since it's a cross-page entry point, not in-page filtering.
+  - Completed: 2026-07-23
+- **Loading/error/empty states** — row-skeleton list while loading, `ErrorState` with retry, and two distinct empty states ("no documents at all" vs. "no results for these filters," so a new empty account isn't told to "try adjusting your filters").
+  - Completed: 2026-07-23
+  - Notes: Found and fixed a real Base UI gotcha via browser testing — `Select.Value` does **not** auto-derive its displayed label from the matching `SelectItem`'s children (unlike Radix's `SelectValue`); it just renders the raw value string unless given a `children` render-function (`{(value) => label}`). All three Explorer selects were initially showing raw values (`"all"`, `"updated_at"`) instead of their labels — fixed by adding label-lookup render functions. Documented as a new Base UI-vs-Radix decision (§9) since it'll bite again the moment `Select` is reused elsewhere. Verified end-to-end with headless-Chromium Playwright: table renders, search/category/review-status/tag/sort filters all correctly update the URL and results, pagination, row-click navigation, empty state for a nonsense query, and mobile view swapping the table for a stacked list — zero console errors except the expected 404 from clicking into `/documents/{id}` (Phase 4.5).
+
 ---
 
 ## 4. Pending Features
 
 ### High Priority
 
-- Document Explorer UI — list/filter/search/paginate (S3), next up
-- Upload UI — the two-step stepper with drag-and-drop (S4)
+- Upload UI — the two-step stepper with drag-and-drop (S4), next up
 - Document Details UI — overview/versions/activity tabs (S5–S7)
 
 ### Medium Priority
 
 - Automated backend test suite (`pytest`) — unit tests for permission checks, version allocation, search ranking; one integration test covering the full upload→version→search→download loop (roadmap Phase 6)
 - Signed/short-lived-token URL for file download/preview links (browsers can't attach an `Authorization` header to a plain `<a href>`, so the BFF proxy's documented exception needs to be built)
-- Wire up the topbar search box and Upload button (currently present but intentionally disabled placeholders — functional once Explorer/Upload phases land)
+- Wire up the topbar's Upload button (currently present but intentionally disabled — functional once the Upload phase lands; the search box is already wired as of Phase 4.3)
 - Pending Reviews UI, Trash UI, Categories/Tags admin UI (S6–S9)
 - Settings screen (S10)
 
@@ -248,7 +265,8 @@ DocBrain/
     │   │   ├── (auth)/login/page.tsx
     │   │   ├── (app)/
     │   │   │   ├── layout.tsx       # sidebar + topbar shell
-    │   │   │   └── page.tsx         # dashboard (Phase 4.2 — real widgets, not a placeholder)
+    │   │   │   ├── page.tsx         # dashboard (Phase 4.2 — real widgets, not a placeholder)
+    │   │   │   └── documents/page.tsx  # Explorer (Phase 4.3) — Suspense-wrapped (useSearchParams)
     │   │   └── api/
     │   │       ├── auth/login/route.ts    # sets the httpOnly session cookie
     │   │       ├── auth/logout/route.ts   # clears it
@@ -258,10 +276,16 @@ DocBrain/
     │   │   ├── layout/              # Sidebar, Topbar, UserMenu, ThemeToggle, AppBreadcrumb, nav-items.ts
     │   │   ├── shared/               # PageHeader, EmptyState, ErrorState, ReviewStatusBadge,
     │   │   │                        # FileTypeIcon, UserAvatar, ConfirmDialog, KpiCard,
-    │   │   │                        # DocumentListItem, ActivityFeedItem
+    │   │   │                        # DocumentListItem, ActivityFeedItem, SearchBox,
+    │   │   │                        # PaginationBar
     │   │   └── providers/           # QueryProvider, ThemeProvider
     │   ├── features/
     │   │   ├── auth/                # types.ts, api.ts, hooks.ts, components/login-form.tsx
+    │   │   ├── taxonomy/            # types.ts, api.ts, hooks.ts (categories + tags, list-only —
+    │   │   │                        #   full CRUD lands with the admin screens in 4.7/4.8)
+    │   │   ├── documents/           # types.ts, api.ts, hooks.ts,
+    │   │   │                        # components/ (DocumentFilters, DocumentsTable,
+    │   │   │                        #   DocumentsMobileList, TagFilterCombobox)
     │   │   └── dashboard/           # types.ts, api.ts, hooks.ts,
     │   │                            # components/ (KpiSection, CategoryDistribution,
     │   │                            #   DocumentListCard, ActivityFeed, PendingReviewsBanner,
@@ -367,13 +391,13 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 | Login | ✅ Done — persona picker (live data) + email form, RHF + Zod |
 | Dashboard | ✅ Done — KPIs, category distribution, recently-added/accessed, expiring-soon, role-gated pending-reviews banner, activity feed, all live-data |
 | Upload | ⬜ Not started (topbar button present but disabled) |
-| Explorer | ⬜ Not started (search box present but disabled; dashboard widgets already link to `/documents?...` query params it will need to read) |
-| Document Details | ⬜ Not started (dashboard document rows already link to `/documents/{id}`, which 404s until Phase 4.5 — same forward-dependency pattern as the disabled topbar buttons) |
+| Explorer | ✅ Done — URL-driven filters (search/category/review-status/tags/sort), table + mobile list, pagination, empty/error/loading states, topbar search wired up |
+| Document Details | ⬜ Not started (dashboard/Explorer rows already link to `/documents/{id}`, which 404s until Phase 4.5 — same forward-dependency pattern as the disabled topbar Upload button) |
 | Version History | ⬜ Not started |
-| Search | ⬜ Not started |
-| Responsive Design | ✅ Verified for the shell and now the Dashboard (mobile/tablet/desktop screenshots, no horizontal scroll, KPI grid 2→4 cols, widget grids collapse to 1 col below `lg`) |
+| Search | ✅ Done — full-text search via the Explorer's search box (in-page, debounced) and the topbar's global search box (submit-triggered, from anywhere in the app) |
+| Responsive Design | ✅ Verified for the shell, Dashboard, and now the Explorer (mobile/tablet/desktop screenshots, no horizontal scroll; the Explorer's table becomes a stacked list below `lg` instead of scrolling horizontally) |
 
-**What exists:** Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + shadcn/ui (Base UI primitives) + TanStack Query + React Hook Form + Zod + next-themes, fully wired: design tokens, API layer, BFF proxy, auth guard, login, app shell, and a live Dashboard all working end-to-end — verified with headless-Chromium Playwright scripts (shell: 10-step flow; dashboard: full-content check across Admin and Employee personas, dark mode, tablet, and mobile viewports), not just code review. Production build (`next build`) succeeds cleanly; TypeScript and ESLint are both clean.
+**What exists:** Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + shadcn/ui (Base UI primitives) + TanStack Query + React Hook Form + Zod + next-themes, fully wired: design tokens, API layer, BFF proxy, auth guard, login, app shell, a live Dashboard, and a live Document Explorer all working end-to-end — verified with headless-Chromium Playwright scripts (shell: 10-step flow; dashboard: full-content check across Admin/Employee personas, dark mode, tablet, mobile; Explorer: filters, pagination, row navigation, empty state, mobile layout), not just code review. Production build (`next build`) succeeds cleanly; TypeScript and ESLint are both clean.
 
 ---
 
@@ -402,6 +426,10 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 - **2026-07-23** — Client-side review-status thresholds (`getReviewStatus()` in `lib/format.ts`) hard-mirror the backend's exact overdue/due-soon/ok cutoffs (`documents/repository.py`'s `<today` / `today..today+30` / `>today+30`), rather than inventing separate frontend thresholds — a document must never show a different badge than it would filter to via the same `reviewStatus` query param in the Explorer.
 - **2026-07-23** — No date-formatting library added for the activity feed's relative timestamps (`formatRelativeTime()` uses the built-in `Intl.RelativeTimeFormat`) — matches the "no unnecessary dependencies" rule; revisit only if a real need for timezone-aware or locale-heavy formatting appears later.
 - **2026-07-23** — Dashboard widgets that reuse the same card shape (Recently Added / Recently Accessed / Expiring Soon) are one generic `DocumentListCard` driven by props (`meta`, `trailing` render functions), not three near-identical components — avoids the "duplicate logic" anti-pattern the frontend spec explicitly calls out.
+- **2026-07-23** — Explorer filter state lives entirely in the URL (`useSearchParams`), not React state — makes results bookmarkable/shareable and back-button-correct for free, and is *why* the Dashboard's `/documents?categoryId=…` links (built one phase earlier, dead until now) work correctly with zero Explorer-side code aware of the Dashboard.
+- **2026-07-23** — Base UI's `Select.Value` does not auto-derive its label from the matching `SelectItem`'s children the way Radix's `SelectValue` does — it renders the raw `value` unless given a `children` render-function. A second Base UI-vs-Radix gotcha (after the `DropdownMenuGroup` one in Phase 4.1) — anything reaching for `Select` should expect to pass an explicit label lookup.
+- **2026-07-23** — Tag filtering fetches the full tag vocabulary once (`limit: 100`) and filters client-side via cmdk's built-in matching, rather than a debounced per-keystroke server search — the vocabulary is a few dozen entries (not thousands), so a server round-trip per keystroke would be over-engineering for the current scale. Revisit if the tag count grows substantially.
+- **2026-07-23** — The topbar's global search box is submit-triggered (Enter navigates to `/documents?q=…`), while the Explorer's own in-page search box is debounce-live — deliberately different UX for a cross-page entry point vs. in-page filtering, not an inconsistency.
 
 ---
 
@@ -416,12 +444,14 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 - ~~Hard-deleting a document with a restored version (`restored_from_version_id` pointing at a version being deleted in the same batch) threw a 500 (FK violation)~~ — fixed via `ON DELETE SET NULL` migration. Fixed 2026-07-23.
 - ~~User menu crashed on open (`Base UI: MenuGroupContext is missing`)~~ — `DropdownMenuLabel` needed a `DropdownMenuGroup` wrapper (Base UI is stricter than Radix here). Found via browser testing, fixed 2026-07-23.
 - ~~Base UI console warning on Dashboard: `Button` rendered as a `Link` ("View all" / "Review now") expected a native `<button>`~~ — needed `nativeButton={false}` when polymorphically rendering as an `<a>`. Found via browser testing, fixed 2026-07-23.
+- ~~Dashboard's `/documents?categoryId=…` and `/documents?reviewStatus=…` links 404'd because the Explorer didn't exist yet~~ — resolved by building the Explorer (Phase 4.3); those links now work exactly as designed.
+- ~~Explorer's Category/Review Status/Sort selects displayed raw values (`"all"`, `"updated_at"`) instead of labels~~ — Base UI's `Select.Value` needed an explicit label-lookup render function (see Known Issues → Resolved and §9). Found via browser testing, fixed 2026-07-23.
 
 ### Open
 
 - **No automated test suite.** All backend verification so far has been manual (curl + direct DB queries); the frontend has ad hoc Playwright smoke scripts (not checked into the repo — live in the session scratchpad) rather than a real test suite. Thorough, but not regression-proof. Formal `pytest`/component-test suites are Phase 6 in the roadmap, not yet started.
 - **Dashboard's "Recently Accessed" widget shows `updatedAt`, not a true "last accessed" timestamp.** `GET /dashboard/summary` returns `DocumentSummary` objects, which don't include `lastAccessedAt` (only `DocumentDetail` does, via the document-detail endpoint). Not worth a backend schema change for one dashboard widget's label right now — revisit if it's noticeably confusing in practice.
-- **Dashboard document links point at `/documents/{id}` and category/review-status links point at `/documents?...`, neither of which exist yet.** Intentional forward-dependency (Explorer is Phase 4.3, Details is Phase 4.5) — clicking them 404s until those phases land, same accepted pattern as the topbar's disabled Upload/Search buttons.
+- **Document row/card links point at `/documents/{id}`, which doesn't exist yet.** Intentional forward-dependency (Details is Phase 4.5) — clicking a document from the Dashboard or Explorer 404s until that phase lands, same accepted pattern as the topbar's disabled Upload button.
 - **Browser can't directly download files via a plain link.** `GET /versions/{n}/content` requires a Bearer token; a plain `<a href>` in a browser won't attach one. The architecture doc already flags this as the one deliberate exception to the BFF-proxies-everything pattern (§10.2) — needs a signed/short-lived-token URL or signed cookie once the frontend is built. Not a bug, but not yet solved either.
 - **Search doesn't cover document body text.** `search_vector` indexes title, description, tags, category name, and current filename — not the actual PDF/DOCX content (FR-22, deferred).
 - **No duplicate-upload detection.** SHA-256 checksums are computed and stored per version, but nothing checks "does this content already exist?" and warns the user (FR-21, deferred).
@@ -430,9 +460,8 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 
 ## 11. Next Immediate Tasks
 
-1. Build the `documentsApi` API layer + Document Explorer (S3, Phase 4.3), consuming `GET /documents` with URL-driven filter state (`categoryId`, `reviewStatus`, etc. — the query params the Dashboard already links to). This also unblocks wiring up the topbar's search box.
-2. Build the Upload flow (S4, Phase 4.4), consuming `POST /documents` (multipart) — unblocks the topbar's Upload button.
-3. Build Document Details + Version History (S5–S6, Phases 4.5–4.6) — makes the Dashboard's `/documents/{id}` links resolve instead of 404ing.
+1. Build the Upload flow (S4, Phase 4.4), consuming `POST /documents` (multipart) — unblocks the topbar's Upload button. Category picker and tag input can reuse `taxonomyApi`/`TagFilterCombobox`-adjacent patterns from the Explorer.
+2. Build Document Details + Version History (S5–S6, Phases 4.5–4.6) — makes the Dashboard's and Explorer's `/documents/{id}` links resolve instead of 404ing.
 
 ---
 
@@ -461,6 +490,7 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 
 ### 2026-07-23
 
+- Completed **Phase 4.3 (Document Explorer)** — `documentsApi` + `taxonomyApi` feature modules, URL-driven filter state (search/category/review-status/tags/sort/page — the same query params the Dashboard already links to), a debounced `SearchBox` and `PaginationBar` (new shared components), a `TagFilterCombobox`, a desktop `DocumentsTable` collapsing to a mobile stacked list below `lg`, and the topbar's search box wired up for real. Verified end-to-end with headless-Chromium Playwright: filters, pagination, row navigation, empty state for a nonsense query, and mobile layout — zero console errors except the expected 404 from clicking into `/documents/{id}` (Phase 4.5, not yet built). Found and fixed one real Base UI gotcha along the way — `Select.Value` needs an explicit label-lookup render function; it doesn't auto-derive labels from `SelectItem` children like Radix does. TypeScript, ESLint, and `next build` all clean.
 - Completed **Phase 4.2 (Dashboard)** — `dashboardApi` feature module, KPI section, role-gated Pending Reviews banner, Documents by Category bar chart, Recently Added / Recently Accessed / Expiring Soon (one generic `DocumentListCard`, not three duplicates), and a Recent Activity feed, all consuming the live `GET /dashboard/summary` and `GET /dashboard/activity` endpoints. New shared types (`src/types/document.ts`) and shared components (`KpiCard`, `DocumentListItem`, `ActivityFeedItem`) built for reuse by the Explorer and Document Details phases. Verified end-to-end with headless-Chromium Playwright scripts across an Admin persona (all widgets + banner visible) and an Employee persona (banner and admin-only nav correctly hidden), plus dark mode, tablet, and mobile viewports — zero console errors after fixing one real Base UI warning (`nativeButton={false}` needed when rendering `Button` as a `Link`). TypeScript, ESLint, and `next build` all clean.
 - Completed **Phase 4.1 (Application Shell)** — design tokens (from-scratch enterprise palette + a fixed font-loading bug), API layer foundation, BFF proxy, auth guard, login page, reusable component library, and the full sidebar/topbar shell. Verified end-to-end with a real headless-Chromium Playwright script (10-step flow, screenshots, console-error check) — not just code review. Found and fixed one real bug along the way (`DropdownMenuLabel` needing a `DropdownMenuGroup` wrapper under Base UI). TypeScript, ESLint, and `next build` all clean.
 - Converted the entire backend API to camelCase JSON (was snake_case, doc specifies camelCase) — new `CamelModel` schema base + aliased query/form params across all 6 modules. Re-verified all 12 endpoint categories end-to-end with the new wire format, including nested objects, list filters, multipart form fields, and validation-error field names.
