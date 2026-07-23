@@ -26,3 +26,29 @@ class ThemePreference(str, enum.Enum):
     LIGHT = "light"
     DARK = "dark"
     SYSTEM = "system"
+
+
+class ExtractionMethod(str, enum.Enum):
+    PDF = "PDF"
+    DOCX = "DOCX"
+    XLSX = "XLSX"
+    PPTX = "PPTX"
+    PLAIN = "PLAIN"
+
+
+class ExtractionStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+    UNSUPPORTED = "UNSUPPORTED"
+
+
+class AiJobType(str, enum.Enum):
+    EXTRACT = "EXTRACT"
+
+
+class AiJobStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
