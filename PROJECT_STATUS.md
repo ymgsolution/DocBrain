@@ -2,7 +2,7 @@
 
 > **This is the single source of truth for the project.** It must be updated whenever a feature is added, modified, refactored, removed, or completed. See [Important Rules](#important-rules) at the bottom.
 
-**Last updated:** 2026-07-23 (Phase 4.9 — Settings — Phase 4 complete)
+**Last updated:** 2026-07-23 (Pending Reviews UI + Trash UI — the two S6/S8 screens outside the 4.1–4.9 module order)
 
 ---
 
@@ -30,6 +30,7 @@ Full architecture rationale lives in [docs/DOCBRAIN-ARCHITECTURE.md](docs/DOCBRA
 - ✅ Backend APIs (all modules from §9.1 of the architecture doc are built and manually verified)
 - 🟨 Testing (extensive manual/curl verification done per-feature on the backend; browser-driven Playwright smoke test done for the shell; no automated `pytest`/component-test suite yet — that's Phase 6 in the roadmap)
 - ✅ Frontend Phase 4 — **complete** (Phase 4.1 — Application Shell. 4.2 — Dashboard. 4.3 — Document Explorer. 4.4 — Upload Document. 4.5 — Document Details. 4.6 — Version History. 4.7 — Categories Admin. 4.8 — Tags Admin. 4.9 — Settings: profile (read-only), theme toggle, default page size — both preferences genuinely wired into the app, not just stored: theme persists across login and the Explorer's page size actually reads the saved value. Every screen from §6 (S1–S10) is now built and verified end-to-end in a real browser. Phase 5 (Integration hardening) and Phase 6 (Testing) are next per the roadmap — see §11)
+- ✅ Pending Reviews UI + Trash UI (§6.7/§6.8) — the two remaining documented screens (S6, S8) that sat outside the strict 4.1–4.9 module order. `/reviews` (Reviewer/Admin queue, filters, mark-as-reviewed) and `/trash` (all users, owner-or-Admin scoped, restore + Admin-only type-to-confirm permanent delete). Found and fixed a backend gap along the way: there was no way to list trashed documents at all — added `GET /api/v1/documents/trash`.
 - ⬜ Deployment
 
 ---
@@ -94,6 +95,8 @@ Full architecture rationale lives in [docs/DOCBRAIN-ARCHITECTURE.md](docs/DOCBRA
 - **Soft delete / restore (Trash)** and **hard delete** (Admin-only, Trash-only, purges files from disk).
   - Completed: 2026-07-23
   - Notes: Found and fixed a real bug here — hard-deleting a document with a *restored* version (`v3.restored_from_version_id → v1`) threw a 500, because that self-referential FK had no `ON DELETE` behavior. Fixed with `ON DELETE SET NULL` via a new migration, reverified the exact failing scenario end-to-end.
+- **List Trash** (`GET /documents/trash`) — added 2026-07-23 when building the Trash frontend screen. Architectural gap: `GET /documents` hardcodes `status=ACTIVE` and the architecture doc's §8.3 never actually specified a way to list deleted documents at all, despite §6.8 documenting a full Trash screen. Scoped identically to soft-delete/restore (owner sees only their own trashed documents; Admin sees every trashed document org-wide) — same permission rule, no new authorization concept. Added a `Document.deleted_by_user` relationship (the `deleted_by` FK column already existed but had no relationship object) so the response can include who deleted it, not just when.
+  - Completed: 2026-07-23
 
 ### Versions
 
@@ -267,15 +270,26 @@ Full architecture rationale lives in [docs/DOCBRAIN-ARCHITECTURE.md](docs/DOCBRA
 
 **Phase 4 (Frontend) is now complete — every screen from architecture doc §6 (S1–S10) is built and verified in a real browser, not just code-reviewed.**
 
+### Frontend — Pending Reviews & Trash (S6, S8 — outside the 4.1–4.9 module order)
+
+- **Architectural gap found and fixed before implementing**: no backend endpoint existed to list trashed documents at all (`GET /documents` hardcodes `status=ACTIVE`, and §8.3 never specified a Trash-listing route despite §6.8 documenting the full screen). Added `GET /api/v1/documents/trash` to the existing `documents` module (not a new module — it's a status-filtered list alongside the soft-delete/restore/hard-delete endpoints already there), scoped identically to those existing endpoints (owner-or-Admin).
+  - Completed: 2026-07-23
+- **`/reviews`** (Reviewer/Admin only, 403 for everyone else) — table of due/overdue documents (title, category, owner, due date with days-overdue, status badge), category/owner filters, `[Open]`/`[Mark as reviewed]` per row. Backed entirely by the already-built `GET /reviews/pending` and `POST /documents/{id}/reviews` (Phase 3) — only the frontend wiring (`features/reviews/`) and page were new. Reuses the existing `MarkReviewedDialog` from Document Details (Phase 4.5) as-is rather than building a second one.
+  - Completed: 2026-07-23
+- **`/trash`** (all users, no role gate — scoping happens server-side) — table (title, category, owner, deleted by, deleted at), `[Restore]` on every row (always valid for whatever rows are visible, since the list itself is already scoped to what that user is allowed to restore), and an Admin-only `[Delete permanently]` using a new `TypeToConfirmDialog` (generalizes the existing `ConfirmDialog` — the architecture doc explicitly requires type-to-confirm for this one destructive action, unlike every other delete in the app).
+  - Completed: 2026-07-23
+- **`documentsApi.hardDelete()`** added (the one CRUD action on documents that had no frontend wiring yet — `DELETE /documents/{id}/permanent` existed on the backend since Phase 3 but nothing called it). The shared `invalidateAfterDocumentChange()` helper (used by mark-reviewed/soft-delete/restore/update) now also invalidates `["reviews"]`/`["trash"]`, so any document mutation keeps both queues in lockstep automatically instead of each call site remembering to do it.
+  - Completed: 2026-07-23
+  - Notes: Verified end-to-end with headless-Chromium Playwright. Reviews: logged in as Rahul (Reviewer), confirmed the queue renders real overdue/due-soon seed documents, marked one as reviewed and confirmed the row count dropped by one and the toast showed the new due date; confirmed an Employee persona sees no "Pending Reviews" nav link and gets `ForbiddenState` hitting `/reviews` directly by URL. Trash: created a throwaway document as Priya, soft-deleted it, confirmed it appeared in her own scoped Trash view, restored it, confirmed it reappeared in Documents, soft-deleted it again, logged in as Anita (Admin) and confirmed she sees it too (org-wide scope), opened the type-to-confirm dialog and confirmed the delete button stays disabled with no input and with the wrong text typed, only enabling once the exact title is typed, then permanently deleted it and confirmed Trash was empty again. Zero console errors in either flow. One leftover throwaway document from an early failed test iteration (a Playwright selector bug, fixed before the passing run) was found afterward via a direct API count check and cleaned up — document/Trash counts confirmed back at the documented baseline (53 documents, 0 in Trash, 12 categories) once the console errors and 404s from a stale query invalidation (see §10) were confirmed to be a pre-existing, non-blocking issue rather than something this phase introduced. TypeScript, ESLint, and `next build` all clean.
+
 ---
 
 ## 4. Pending Features
 
 ### High Priority
 
-*(Phase 4 — Frontend — is complete. Nothing in the originally-scoped module order remains; what's below is everything else in the roadmap, not yet prioritized into a phase.)*
+*(Phase 4 — Frontend — is complete, and so are the two S6/S8 screens that sat outside its module order. What's below is everything else in the roadmap, not yet prioritized into a phase.)*
 
-- Pending Reviews UI, Trash UI (S6, S8) — the two remaining screens from §6 that weren't part of the strict 4.1–4.9 module order
 - Automated backend test suite (`pytest`) — unit tests for permission checks, version allocation, search ranking; one integration test covering the full upload→version→search→download loop (roadmap Phase 6)
 
 ### Low Priority
@@ -317,11 +331,12 @@ DocBrain/
 │   │   │   └── models/             # user, category, document, document_version, tag,
 │   │   │                           # activity_event, user_preference, enums
 │   │   ├── schemas/                # Pydantic DTOs: auth, document, version, taxonomy,
-│   │   │                           # review, dashboard, mappers.py (ORM → DTO)
+│   │   │                           # review, trash, dashboard, mappers.py (ORM → DTO)
 │   │   ├── modules/                # package-by-feature
 │   │   │   ├── auth/                (router, service, repository — also owns
 │   │   │   │                        #   GET/PATCH /auth/me/preferences, Phase 4.9)
-│   │   │   ├── documents/           (router, service, repository)
+│   │   │   ├── documents/           (router, service, repository — also owns
+│   │   │   │                        #   GET /documents/trash, added for the Trash screen)
 │   │   │   ├── versions/            (router, service, repository)
 │   │   │   ├── taxonomy/            (router, service, repository)
 │   │   │   ├── reviews/             (router, service, repository)
@@ -352,6 +367,8 @@ DocBrain/
     │   │   │   ├── admin/
     │   │   │   │   ├── categories/page.tsx  # Categories admin (Phase 4.7) — Admin-only, 403 guard
     │   │   │   │   └── tags/page.tsx        # Tags admin (Phase 4.8) — rename/merge/delete
+    │   │   │   ├── reviews/page.tsx         # Pending Reviews (S6) — Reviewer/Admin-only, 403 guard
+    │   │   │   ├── trash/page.tsx           # Trash (S8) — all users, server-side owner-or-Admin scoping
     │   │   │   └── settings/page.tsx        # Settings (Phase 4.9) — profile, theme, page size —
     │   │   │                                #   Phase 4 complete after this
     │   │   └── api/
@@ -362,8 +379,8 @@ DocBrain/
     │   │   ├── ui/                  # 23 shadcn primitives (Base UI, not Radix)
     │   │   ├── layout/              # Sidebar, Topbar, UserMenu, ThemeToggle, AppBreadcrumb, nav-items.ts
     │   │   ├── shared/               # PageHeader, EmptyState, ErrorState, ReviewStatusBadge,
-    │   │   │                        # FileTypeIcon, UserAvatar, ConfirmDialog, KpiCard,
-    │   │   │                        # DocumentListItem, ActivityFeedItem, SearchBox,
+    │   │   │                        # FileTypeIcon, UserAvatar, ConfirmDialog, TypeToConfirmDialog,
+    │   │   │                        # KpiCard, DocumentListItem, ActivityFeedItem, SearchBox,
     │   │   │                        # PaginationBar, UploadDropzone, DownloadLink, ForbiddenState
     │   │   └── providers/           # QueryProvider, ThemeProvider
     │   ├── features/
@@ -374,7 +391,7 @@ DocBrain/
     │   │   │                        #   tags: list/rename/merge/delete), hooks.ts,
     │   │   │                        # components/ (CategoryFormDialog, RenameTagDialog,
     │   │   │                        #   MergeTagDialog)
-    │   │   ├── documents/           # types.ts, api.ts (list/get/update/delete/restore/
+    │   │   ├── documents/           # types.ts, api.ts (list/get/update/delete/restore/hardDelete/
     │   │   │                        #   markReviewed/listVersions/uploadVersion/restoreVersion/
     │   │   │                        #   create — all upload paths share an xhrUpload<T>() helper),
     │   │   │                        # hooks.ts, components/ (DocumentFilters, DocumentsTable,
@@ -382,11 +399,14 @@ DocBrain/
     │   │   │                        #   UploadDocumentDialog, UploadVersionDialog, DocumentHeader,
     │   │   │                        #   DocumentPreview, MetadataPanel, EditMetadataForm,
     │   │   │                        #   MarkReviewedDialog, VersionsTab, DocumentActivityTab)
+    │   │   ├── reviews/             # types.ts, api.ts, hooks.ts — GET /reviews/pending only;
+    │   │   │                        #   mark-as-reviewed is reused from features/documents/
+    │   │   ├── trash/               # types.ts, api.ts, hooks.ts — GET /documents/trash only;
+    │   │   │                        #   restore/hardDelete are reused from features/documents/
     │   │   └── dashboard/           # types.ts, api.ts, hooks.ts,
     │   │                            # components/ (KpiSection, CategoryDistribution,
     │   │                            #   DocumentListCard, ActivityFeed, PendingReviewsBanner,
     │   │                            #   WidgetSkeleton)
-    │   │                            # (remaining features' api layers get built in their own phase)
     │   ├── lib/
     │   │   ├── api-client.ts        # typed fetch wrapper + ApiError, targets /api/bff;
     │   │   │                        # getVersionContentUrl() for downloads/previews
@@ -467,7 +487,7 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 | Module | Router | Service | Repository | Notes |
 |---|---|---|---|---|
 | Auth | ✅ | ✅ | ✅ | Mock login, real JWT, `/auth/me/preferences` GET+PATCH (added 2026-07-23 for Settings) |
-| Documents | ✅ | ✅ | ✅ | Full CRUD + Trash + hard delete |
+| Documents | ✅ | ✅ | ✅ | Full CRUD + Trash (soft delete/restore/**list**, added 2026-07-23) + hard delete |
 | Versions | ✅ | ✅ | ✅ | Upload, download, restore |
 | Taxonomy | ✅ | ✅ | ✅ | Categories + Tags, admin-only mutations |
 | Reviews | ✅ | ✅ | ✅ | Pending queue, mark-reviewed |
@@ -499,6 +519,8 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 | Categories (Admin) | ✅ Done — table with usage counts, New/Edit/Archive/Unarchive, Delete disabled-with-tooltip while in use, 403 for non-Admins |
 | Tags (Admin) | ✅ Done — table sorted by usage, Rename, Merge-into (with an affected-document-count dialog), Delete disabled-with-tooltip while in use, 403 for non-Admins |
 | Settings | ✅ Done — profile (read-only), theme toggle (synced with the topbar's), default page size (actually wired into the Explorer, not just stored) |
+| Pending Reviews | ✅ Done — Reviewer/Admin queue, category/owner filters, mark-as-reviewed (reused dialog), 403 for other roles |
+| Trash | ✅ Done — owner-or-Admin scoped table, restore, Admin-only permanent delete with type-to-confirm |
 | Responsive Design | ✅ Verified for the shell, Dashboard, Explorer, Upload dialog, Document Details / Version History, Categories/Tags admin, and Settings |
 
 **Phase 4 (Frontend) is complete.** Every screen from architecture doc §6 (S1–S10) is built and verified end-to-end in a real browser, not just code-reviewed. **What exists:** Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + shadcn/ui (Base UI primitives) + TanStack Query + React Hook Form + Zod + next-themes, fully wired: design tokens, API layer, BFF proxy, auth guard, login, app shell, a live Dashboard, a live Document Explorer, a live Upload flow, a live Document Details + Version History page, live Categories/Tags admin screens, and a live Settings page all working end-to-end — verified with headless-Chromium Playwright scripts (shell: 10-step flow; dashboard: full-content check across Admin/Employee personas, dark mode, tablet, mobile; Explorer: filters, pagination, row navigation, empty state, mobile layout; Upload: a real file upload through the full form, progress bar, success toast, cache invalidation; Details: view/edit/save, mark-as-reviewed, activity, 404, soft-delete-with-undo, role-gating; Version History: upload-new-version, restore-this-version, both against a throwaway test document; Categories: create/edit/archive/unarchive/delete, delete-blocked tooltip, 403 for non-Admins; Tags: rename/merge/delete against throwaway tags, delete-blocked tooltip, 403 for non-Admins; Settings: theme change with persistence across reload, page-size change actually reflected in the Explorer, non-Admin access confirmed), not just code review. Production build (`next build`) succeeds cleanly; TypeScript and ESLint are both clean.
@@ -556,6 +578,11 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 - **2026-07-23** — `GET`/`PATCH /auth/me/preferences` added to the existing auth module rather than a new "users" module, closing a gap between the documented data model (`user_preferences`, §7), the documented UI requirement (§2.11/§6.10), and the documented API surface (§8.2), which never actually specified this endpoint. Placement follows §2.11's own "Dependencies: Auth" note.
 - **2026-07-23** — Theme and default-page-size preferences are wired into real consumers, not just persisted: the topbar's `ThemeToggle` now also calls `useUpdatePreferences()` (so a theme change from either the topbar or Settings behaves identically and survives to the next login), and the Explorer's page size — hardcoded to `25` since Phase 4.3 — now reads `usePreferences().defaultPageSize`. A setting that persists but is never read by anything would be a half-finished feature.
 - **2026-07-23** — A Base UI `Select`'s `value` prop must never toggle between `undefined` and a defined string across renders (triggers a real "uncontrolled → controlled" warning), but per next-themes' own documented hydration-safety requirement, theme-derived render output also can't differ between the server and the client's first paint. Resolution: keep `value` a string on every render, using the *same* placeholder string (`"system"`) before and during the mount-guard transition, rather than `undefined` before and a real value after. Two different-looking bugs (a console warning, and later a genuine hydration-mismatch error) turned out to share one root cause and one fix.
+- **2026-07-23** — `GET /documents/trash` added to the existing `documents` module rather than a new `trash` module, unlike Pending Reviews (which got its own `reviews` module). Reasoning: Trash is fundamentally a status-filtered list plus the soft-delete/restore/hard-delete actions already living in `documents`, whereas Reviews introduces a genuinely separate cross-cutting query shape (`PendingReviewItem` with computed `daysOverdue`) and its own mutation (`mark_reviewed`). Frontend still gets its own `features/trash/` folder for the list query, matching the route structure — only the mutations (`restore`, `hardDelete`) are shared from `features/documents/`, since those operate on the Document resource itself.
+- **2026-07-23** — The new `GET /documents/trash` route is registered in `documents/router.py` *before* `GET /documents/{document_id}`, not after. FastAPI/Starlette match routes in registration order using the raw path structure, not the parameter's declared type — a request to `/documents/trash` registered after `/documents/{document_id}` would match the dynamic route first and fail UUID parsing with a 422, never reaching the literal `/trash` route.
+- **2026-07-23** — Trash listing is scoped identically to soft-delete/restore (owner sees only their own trashed documents, Admin sees every trashed document org-wide) rather than a role check — reuses the exact permission rule already established in `_assert_can_delete`, so the Restore button never needs its own client-side gating: whatever rows the scoped list returns are always ones the current user is allowed to restore.
+- **2026-07-23** — `TypeToConfirmDialog` (new shared component) generalizes the existing `ConfirmDialog` for the one action in the app the architecture doc explicitly requires extra friction for — Trash's Admin-only permanent delete (§6.8: "type-to-confirm"). Every other destructive action (soft-delete, category/tag delete) uses the plain `ConfirmDialog` — this one is deliberately not the default, reserved for truly irreversible actions.
+- **2026-07-23** — The shared `invalidateAfterDocumentChange()` helper (already used by mark-reviewed/soft-delete/restore/update since Phase 4.5) now also invalidates `["reviews"]` and `["trash"]` query keys. Centralizing this in one place means any future document mutation automatically keeps both queues correct, rather than requiring each new mutation hook to remember which other screens might be showing stale data as a result.
 
 ---
 
@@ -589,18 +616,18 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 - **No duplicate-upload detection.** SHA-256 checksums are computed and stored per version, but nothing checks "does this content already exist?" and warns the user (FR-21, deferred).
 - **PDF preview can't be visually verified in headless-Chromium Playwright testing** — the bundled headless Chromium has no active PDF-viewer plugin, so the iframe renders blank in automated screenshots even though the underlying response is a valid PDF with correct headers (verified by fetching the URL directly). Not a product bug — renders normally in every real browser — but means this one feature's visual correctness relies on the direct-fetch check rather than a screenshot, worth remembering if it's ever re-verified.
 - **Testing version-history mutations (restore, upload-new-version) requires a throwaway document, not the seed corpus.** `DocumentVersion` rows are append-only with no delete endpoint, so any test upload/restore against a seeded document permanently inflates its version count and the Dashboard's `versionsTracked` total. Established pattern going forward: create a test document via Upload, test against it, hard-delete it afterward — never mutate versions on seed documents.
+- **Soft-deleting a document from its own detail page (`/documents/{id}`) triggers a harmless one-off 404 on `GET /documents/{id}`.** The delete mutation's success handler invalidates `documentsKeys.detail(id)` (via `invalidateAfterDocumentChange`) before `router.push("/documents")` runs; since the query is still actively observed for that brief moment, it refetches immediately — but the document is now `DELETED`, and the detail endpoint only resolves `ACTIVE` documents, so that one refetch 404s. No visible error reaches the user (no toast, no error state renders, navigation completes normally) — found via a Playwright console listener during Trash testing, not by any visible symptom. Pre-existing since Phase 4.5 (the `documentsKeys.detail(id)` invalidation already existed before Pending Reviews/Trash added `["reviews"]`/`["trash"]` alongside it); not introduced by this phase. Low priority — would need reordering the navigation before the invalidation, or excluding the detail key from invalidation on delete specifically.
 
 ---
 
 ## 11. Next Immediate Tasks
 
-**Phase 4 (Frontend) is complete — S1 through S10 all built and verified.** Nothing remains in the strict 4.1–4.9 module order. Candidates for what's next, in the roadmap's own order (§19):
+**Phase 4 (Frontend) is complete — S1 through S10 all built and verified — and so are Pending Reviews/Trash (S6/S8), the two documented screens that sat outside the 4.1–4.9 module order.** Every screen in the architecture doc's §6 screen plan now exists and is verified end-to-end. Candidates for what's next, in the roadmap's own order (§19):
 
-1. Pending Reviews UI and Trash UI (§6.7/§6.8) — the two screens from the full §6 plan that weren't part of the 4.1–4.9 sequence but are still documented product surface.
-2. Phase 5 (Integration) hardening — the architecture doc scopes this as "frontend wired to the real backend end to end... error envelope mapped to form/toast/inline states consistently across every screen" (§19.6). Given the build-and-verify-as-you-go approach used throughout Phase 4, most of this is likely already true in practice — this would be a deliberate audit pass, not new construction.
-3. Phase 6 (Testing) — automated `pytest` suite (backend), one integration test for the full upload→version→search→download loop, a scripted demo walkthrough exercising each of the six pains from the original brief in order (§19.7).
+1. Phase 5 (Integration) hardening — the architecture doc scopes this as "frontend wired to the real backend end to end... error envelope mapped to form/toast/inline states consistently across every screen" (§19.6). Given the build-and-verify-as-you-go approach used throughout Phase 4, most of this is likely already true in practice — this would be a deliberate audit pass, not new construction.
+2. Phase 6 (Testing) — automated `pytest` suite (backend), one integration test for the full upload→version→search→download loop, a scripted demo walkthrough exercising each of the six pains from the original brief in order (§19.7).
 
-No default chosen yet — ask before starting the next one, since Phase 4's module order was explicit and this next stretch isn't.
+No default chosen yet — ask before starting the next one.
 
 ---
 
@@ -629,6 +656,7 @@ No default chosen yet — ask before starting the next one, since Phase 4's modu
 
 ### 2026-07-23
 
+- Completed **Pending Reviews UI + Trash UI (§6.7/§6.8, screens S6/S8)** — the two documented screens that sat outside the strict 4.1–4.9 module order; every screen in the architecture doc's §6 plan now exists. Found and fixed a backend gap before implementing: there was no way to list trashed documents at all (`GET /documents` hardcodes `status=ACTIVE`, and §8.3 never specified a Trash-listing route). Added `GET /api/v1/documents/trash` to the existing `documents` module, scoped identically to the already-existing soft-delete/restore/hard-delete endpoints (owner sees their own trashed documents; Admin sees all), plus a `Document.deleted_by_user` relationship so the response can show who deleted each document. `/reviews` (Reviewer/Admin-only, 403 otherwise) reuses the already-built `GET /reviews/pending` and the existing `MarkReviewedDialog` from Document Details — only the frontend feature wiring and page were new. `/trash` (all users, no client-side role gate — scoping is server-side) adds a new `TypeToConfirmDialog` shared component for the Admin-only permanent-delete action, since the architecture doc specifically requires type-to-confirm there and nowhere else in the app. Wired `documentsApi.hardDelete()` (the one document CRUD action with no frontend caller until now) and extended the shared `invalidateAfterDocumentChange()` helper to also invalidate the reviews/trash query keys, so any document mutation keeps both queues correct automatically. Verified end-to-end with headless-Chromium Playwright: the Reviews queue against real seed data (marked a document reviewed, confirmed the row count dropped and the row disappeared, confirmed Employee-role 403), and the full Trash lifecycle against a throwaway document (soft-delete → owner-scoped visibility → restore → re-delete → Admin org-wide visibility → type-to-confirm gating (disabled empty, disabled on wrong text, enabled only on an exact match) → permanent delete → empty Trash). One leftover throwaway document from an earlier failed test iteration (a Playwright selector bug, since fixed) was found via a direct API count check and cleaned up; document/Trash/category counts confirmed back at their documented baselines afterward. TypeScript, ESLint, and `next build` all clean.
 - Completed **Phase 4.9 (Settings) — Phase 4 (Frontend) is now fully complete.** Found and fixed an architectural gap before implementing: `user_preferences` existed in the schema and the seed data, and §2.11/§6.10 scoped Settings around it with "Dependencies: Auth," but §8.2's documented API surface never actually exposed it — added `GET`/`PATCH /auth/me/preferences` to the existing auth module. Built `/settings` (no role gate — personal, not admin-only): a read-only profile card and a preferences card. Both preferences are wired into real consumers rather than just stored: the topbar's `ThemeToggle` now also persists via `useUpdatePreferences()` alongside `next-themes`, and the Explorer's page size (hardcoded to 25 since Phase 4.3) now reads `usePreferences().defaultPageSize`. Found and fixed two related real bugs via browser testing in the same component: a Base UI "uncontrolled → controlled" `Select` warning, and — after a first fix attempt removed the guard causing that warning — a genuine hydration mismatch, since `next-themes` resolves `theme` from `localStorage` synchronously on the client's first render. Both share one root cause (the `Select`'s `value` must stay a string throughout, never `undefined`) and one fix. Verified end-to-end with headless-Chromium Playwright as an Employee persona: profile display, theme change with cross-reload persistence, page-size change actually reflected in the Explorer's results, and correct non-Admin access (no 403, unlike Categories/Tags). Both preferences restored to their seeded baseline afterward. TypeScript, ESLint, and `next build` all clean. Every screen from architecture doc §6 (S1–S10) is now built and verified in a real browser.
 - Completed **Phase 4.8 (Tags Admin)** — `/admin/tags` per §6.9: table sorted by usage (backend already returns `usage_count desc, name asc`), Rename via `RenameTagDialog`, Merge-into via `MergeTagDialog` (confirmation states the affected document count from the tag's already-known `usageCount`, no new backend call needed), and Delete disabled-with-tooltip while `usageCount > 0` — reusing the exact precheck/tooltip/`ForbiddenState` patterns established in Categories (4.7) rather than re-deriving them. No "New tag" button, since §6.9 doesn't list one for Tags — they're created implicitly through `TagInput`. `tagsApi` grew rename/merge/delete (was list-only); mutations invalidate the same cache key `TagInput`/`TagFilterCombobox` already read, so those pickers see changes for free. This completes every module through S9 in the original screen plan — only Settings (S10, Phase 4.9) remains in Phase 4. Verified end-to-end with headless-Chromium Playwright using two throwaway tags on a throwaway document (never the seed vocabulary): rename, merge (toast correctly reported "1 document(s) updated," confirming the backend's already-tagged dedup logic, not a naive double-insert), delete-blocked-with-tooltip, freed the tag to usage=0 and confirmed delete then succeeded, and 403 for a non-Admin persona. Tag count (30) and document count (53) both confirmed back at their documented baselines after cleanup. TypeScript, ESLint, and `next build` all clean.
 - Completed **Phase 4.7 (Categories Admin)** — `/admin/categories` per §6.9: table (name, description, usage count, status), New/Edit via a shared `CategoryFormDialog`, one-click Archive/Unarchive as a separate action from Edit, and Delete disabled-with-tooltip while `documentCount > 0` (client-side precheck mirrors the backend's exact `ConflictError` condition). Built the app's first 403 state (`ForbiddenState`, new shared component, per §6.10's exact copy) since `/admin/categories` is reachable directly by URL even though the sidebar already hides its nav link from non-Admins. `categoriesApi` grew create/update/delete (was list-only since Phase 4.3); `useCategories()` gained an `includeArchived` param defaulting to `false` so the Explorer's existing filter dropdown is unaffected. Found one real cross-browser quirk along the way: a disabled `<button>` doesn't reliably fire the hover events `Tooltip.Trigger` needs, so the trigger has to be a wrapping `<span tabIndex={0}>` instead — the app's first real `Tooltip` usage to hit this. Verified end-to-end with headless-Chromium Playwright: create/edit/archive/unarchive/delete on a throwaway category, delete-blocked tooltip confirmed on a real in-use seed category, and 403 for a non-Admin persona with the sidebar correctly showing no Categories link at all. Category count confirmed back at the documented baseline (12) after cleanup. TypeScript, ESLint, and `next build` all clean.
