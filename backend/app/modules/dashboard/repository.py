@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime
 
 from sqlalchemy import func, select
@@ -84,14 +85,18 @@ class DashboardRepository:
         )
         return self.db.scalar(stmt) or 0
 
-    def list_activity(self, page: int, size: int) -> tuple[list[ActivityEvent], int]:
-        total = self.db.scalar(select(func.count(ActivityEvent.id))) or 0
-        stmt = (
-            select(ActivityEvent)
-            .options(selectinload(ActivityEvent.document), selectinload(ActivityEvent.actor))
-            .order_by(ActivityEvent.occurred_at.desc())
-            .offset(page * size)
-            .limit(size)
+    def list_activity(
+        self, page: int, size: int, *, document_id: uuid.UUID | None = None
+    ) -> tuple[list[ActivityEvent], int]:
+        count_stmt = select(func.count(ActivityEvent.id))
+        stmt = select(ActivityEvent).options(
+            selectinload(ActivityEvent.document), selectinload(ActivityEvent.actor)
         )
+        if document_id is not None:
+            count_stmt = count_stmt.where(ActivityEvent.document_id == document_id)
+            stmt = stmt.where(ActivityEvent.document_id == document_id)
+
+        total = self.db.scalar(count_stmt) or 0
+        stmt = stmt.order_by(ActivityEvent.occurred_at.desc()).offset(page * size).limit(size)
         items = list(self.db.scalars(stmt))
         return items, total

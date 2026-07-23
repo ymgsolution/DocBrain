@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from app.db.models import ActivityEvent, Category, Document
@@ -28,5 +29,7 @@ class DashboardService:
         pending_reviews_count = self.repository.pending_reviews_count(REVIEW_HORIZON_DAYS)
         return totals, by_category, recently_added, recently_accessed, expiring_soon, pending_reviews_count
 
-    def list_activity(self, page: int, size: int) -> tuple[list[ActivityEvent], int]:
-        return self.repository.list_activity(page, size)
+    def list_activity(
+        self, page: int, size: int, *, document_id: uuid.UUID | None = None
+    ) -> tuple[list[ActivityEvent], int]:
+        return self.repository.list_activity(page, size, document_id=document_id)

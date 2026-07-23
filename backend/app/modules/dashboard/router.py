@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
@@ -40,10 +42,11 @@ def get_summary(
 def get_activity(
     page: int = Query(default=0, ge=0),
     size: int = Query(default=25, ge=1, le=100),
+    document_id: uuid.UUID | None = Query(default=None, alias="documentId"),
     service: DashboardService = Depends(get_dashboard_service),
     current_user: User = Depends(get_current_user),
 ) -> PagedActivity:
-    items, total = service.list_activity(page, size)
+    items, total = service.list_activity(page, size, document_id=document_id)
     out_items = [
         ActivityEventOut(
             id=e.id,
