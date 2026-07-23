@@ -11,15 +11,16 @@ import { PaginationBar } from "@/components/shared/pagination-bar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError } from "@/lib/api-client";
 import { useDocuments } from "@/features/documents/hooks";
+import { usePreferences } from "@/features/auth/hooks";
 import { DocumentFilters } from "@/features/documents/components/document-filters";
 import { DocumentsTable } from "@/features/documents/components/documents-table";
 import { DocumentsMobileList } from "@/features/documents/components/documents-mobile-list";
 import type { DocumentListFilters, DocumentSort } from "@/features/documents/types";
 import type { ReviewStatus } from "@/types/document";
 
-const PAGE_SIZE = 25;
+const DEFAULT_PAGE_SIZE = 25;
 
-function parseFilters(searchParams: URLSearchParams): DocumentListFilters {
+function parseFilters(searchParams: URLSearchParams, defaultSize: number): DocumentListFilters {
   return {
     q: searchParams.get("q") ?? undefined,
     categoryId: searchParams.get("categoryId") ?? undefined,
@@ -27,7 +28,7 @@ function parseFilters(searchParams: URLSearchParams): DocumentListFilters {
     reviewStatus: (searchParams.get("reviewStatus") as ReviewStatus | null) ?? undefined,
     sort: (searchParams.get("sort") as DocumentSort | null) ?? undefined,
     page: Number(searchParams.get("page") ?? 0),
-    size: PAGE_SIZE,
+    size: Number(searchParams.get("size") ?? defaultSize),
   };
 }
 
@@ -57,7 +58,9 @@ function DocumentExplorer() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const filters = useMemo(() => parseFilters(searchParams), [searchParams]);
+  const { data: preferences } = usePreferences();
+  const defaultSize = preferences?.defaultPageSize ?? DEFAULT_PAGE_SIZE;
+  const filters = useMemo(() => parseFilters(searchParams, defaultSize), [searchParams, defaultSize]);
 
   const updateFilters = useCallback(
     (patch: Partial<DocumentListFilters>) => {
