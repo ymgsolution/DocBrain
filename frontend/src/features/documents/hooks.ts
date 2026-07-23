@@ -97,3 +97,32 @@ export function useRestoreDocument(id: string) {
     onSuccess: () => invalidateAfterDocumentChange(queryClient, id),
   });
 }
+
+function invalidateAfterVersionChange(queryClient: ReturnType<typeof useQueryClient>, id: string) {
+  queryClient.invalidateQueries({ queryKey: documentsKeys.versions(id) });
+  queryClient.invalidateQueries({ queryKey: documentsKeys.activity(id) });
+  invalidateAfterDocumentChange(queryClient, id);
+}
+
+export function useUploadVersion(id: string) {
+  const queryClient = useQueryClient();
+  const [progress, setProgress] = useState(0);
+
+  const mutation = useMutation({
+    mutationFn: ({ file, changeNote }: { file: File; changeNote: string }) => {
+      setProgress(0);
+      return documentsApi.uploadVersion(id, file, changeNote, setProgress);
+    },
+    onSuccess: () => invalidateAfterVersionChange(queryClient, id),
+  });
+
+  return { ...mutation, progress };
+}
+
+export function useRestoreVersion(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (versionNumber: number) => documentsApi.restoreVersion(id, versionNumber),
+    onSuccess: () => invalidateAfterVersionChange(queryClient, id),
+  });
+}

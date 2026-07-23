@@ -32,6 +32,10 @@ export const documentsApi = {
     return apiClient.get<VersionDetail[]>(`/documents/${id}/versions`);
   },
 
+  restoreVersion(id: string, versionNumber: number): Promise<VersionDetail> {
+    return apiClient.post<VersionDetail>(`/documents/${id}/versions/${versionNumber}/restore`, {});
+  },
+
   // XMLHttpRequest instead of fetch — fetch has no cross-browser way to
   // observe upload progress, and the architecture doc requires a
   // determinate progress bar with byte count during upload.
@@ -44,31 +48,43 @@ export const documentsApi = {
     formData.set("tags", payload.tags.join(","));
     if (payload.reviewDueDate) formData.set("reviewDueDate", payload.reviewDueDate);
 
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open("POST", `${BFF_BASE}/documents`);
+    return xhrUpload(`${BFF_BASE}/documents`, formData, onProgress);
+  },
 
-      xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
-      };
+  uploadVersion(id: string, file: File, changeNote: string, onProgress: (percent: number) => void): Promise<VersionDetail> {
+    const formData = new FormData();
+    formData.set("file", file);
+    formData.set("changeNote", changeNote);
 
-      xhr.onload = () => {
-        let data: unknown;
-        try {
-          data = JSON.parse(xhr.responseText);
-        } catch {
-          data = null;
-        }
-        if (xhr.status >= 200 && xhr.status < 300) {
-          resolve(data as DocumentDetail);
-        } else {
-          reject(new ApiError(xhr.status, data as ApiErrorBody));
-        }
-      };
-
-      xhr.onerror = () => reject(new Error("Upload failed — nothing was saved, retry?"));
-
-      xhr.send(formData);
-    });
+    return xhrUpload(`${BFF_BASE}/documents/${id}/versions`, formData, onProgress);
   },
 };
+
+function xhrUpload<T>(url: string, formData: FormData, onProgress: (percent: number) => void): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
+    };
+
+    xhr.onload = () => {
+      let data: unknown;
+      try {
+        data = JSON.parse(xhr.responseText);
+      } catch {
+        data = null;
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(data as T);
+      } else {
+        reject(new ApiError(xhr.status, data as ApiErrorBody));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error("Upload failed — nothing was saved, retry?"));
+
+    xhr.send(formData);
+  });
+}
