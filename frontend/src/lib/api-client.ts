@@ -16,7 +16,7 @@ export class ApiError extends Error {
   }
 }
 
-const BFF_BASE = "/api/bff";
+export const BFF_BASE = "/api/bff";
 
 async function handleResponse<T>(response: Response): Promise<T> {
   if (response.status === 204) return undefined as T;

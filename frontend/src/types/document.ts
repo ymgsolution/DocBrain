@@ -34,3 +34,10 @@ export interface DocumentSummary {
   updatedAt: string;
   createdAt: string;
 }
+
+export interface DocumentDetail extends DocumentSummary {
+  tags: TagSummary[];
+  lastReviewedAt: string | null;
+  lastAccessedAt: string | null;
+  status: "ACTIVE" | "DELETED";
+}
