@@ -2,7 +2,7 @@
 
 > **This is the single source of truth for the project.** It must be updated whenever a feature is added, modified, refactored, removed, or completed. See [Important Rules](#important-rules) at the bottom.
 
-**Last updated:** 2026-07-23 (Phase 5 — Integration audit: consistent error handling across every screen)
+**Last updated:** 2026-07-24 (AI feature track — text extraction foundation: `document_extracted_text` + `ai_jobs` tables, extractors, background worker; pre-Gemini, no user-facing surface yet)
 
 ---
 
@@ -32,6 +32,7 @@ Full architecture rationale lives in [docs/DOCBRAIN-ARCHITECTURE.md](docs/DOCBRA
 - ✅ Frontend Phase 4 — **complete** (Phase 4.1 — Application Shell. 4.2 — Dashboard. 4.3 — Document Explorer. 4.4 — Upload Document. 4.5 — Document Details. 4.6 — Version History. 4.7 — Categories Admin. 4.8 — Tags Admin. 4.9 — Settings: profile (read-only), theme toggle, default page size — both preferences genuinely wired into the app, not just stored: theme persists across login and the Explorer's page size actually reads the saved value. Every screen from §6 (S1–S10) is now built and verified end-to-end in a real browser. Phase 5 (Integration hardening) and Phase 6 (Testing) are next per the roadmap — see §11)
 - ✅ Pending Reviews UI + Trash UI (§6.7/§6.8) — the two remaining documented screens (S6, S8) that sat outside the strict 4.1–4.9 module order. `/reviews` (Reviewer/Admin queue, filters, mark-as-reviewed) and `/trash` (all users, owner-or-Admin scoped, restore + Admin-only type-to-confirm permanent delete). Found and fixed a backend gap along the way: there was no way to list trashed documents at all — added `GET /api/v1/documents/trash`.
 - ✅ Phase 5 — Integration (§19.6) — an audit pass, not new construction: verified the canonical J2 flow (§4.3, Upload→Categorize→Search→View→Update Version→Dashboard Refresh) works end-to-end without touching a terminal, then systematically audited every screen's error handling against §16.5's HTTP-status contract via a dedicated research pass, closing the real gaps it found — see §3 and §9 for the full list (422/409 field-level errors now map onto the actual form field instead of a generic toast, the XHR upload path now redirects on 401 like every other request, a logic bug in Version History's conflict handling was fixed, and the app finally has styled `not-found.tsx`/`error.tsx` instead of falling through to Next's defaults).
+- 🟨 **AI feature track (new, separate from the §19 hackathon roadmap)** — planned end-to-end (see the published "Smart Rename & Auto-Tag — Gemini Rollout Plan": phased rollout starting in shadow mode, `app/ai/` provider-abstraction architecture, Postgres-backed job queue, prompt/token strategy, UX). Coding started at the foundation: text extraction (classic parsing, not an AI call) is fully built and verified — no Gemini integration yet, no UI yet, nothing user-facing. This is deliberate: extraction has no external API dependency and no subjective quality gate, so it's the one piece of the AI pipeline safe to build for real before any Gemini work starts.
 - ⬜ Deployment
 
 ---
@@ -304,6 +305,20 @@ An audit pass, not new construction — every screen was already wired to the re
     - Completed: 2026-07-23
   - Notes: A handful of findings were deliberately left as-is rather than fixed in this pass — see §10 Known Issues for what and why (the audit's full findings, including the non-issues it confirmed were already correct, are not reproduced here). Verified with headless-Chromium Playwright: duplicate category name and duplicate tag rename now show the inline field error instead of a bare toast (confirmed the dialog stays open, no redundant toast fires alongside it, and the offending data was never actually mutated); an unmatched route now renders the new styled 404 with a working "Go to Dashboard" link; normal category-create and normal document-upload were re-verified to still succeed (no regression from the new field-error path intercepting the success case). TypeScript, ESLint, and `next build` all clean.
 
+### AI Feature Track — Text Extraction Foundation (pre-Gemini)
+
+*First increment of a separate, planned initiative — "Smart Rename & Auto-Tag" — scoped and phased outside the §19 hackathon roadmap. No Gemini integration and no user-facing surface yet; this is the deterministic, non-AI foundation the eventual suggestion pipeline reads from.*
+
+- **`document_extracted_text` table** — one row per `document_version_id` (FK, unique), storing only a pointer (`extracted_text_path`) plus status/method/char_count/error metadata — never the extracted text content itself. The content lives on disk as a `.txt` sibling of the source file (`{version.storage_path}.txt`), read/written through the existing `StoragePort` (`save_temp`/`commit`/`open_for_read`/`delete` — zero new methods needed). Mirrors exactly how `document_versions` itself never stores file bytes in Postgres, just a `storage_path`.
+  - Completed: 2026-07-24
+- **`ai_jobs` table** — a shared background-work queue (`job_type`, `status`, `attempt_count`, `last_error`, `next_retry_at`), designed to be reused by every future AI processing stage (extraction today; embedding/metadata-suggestion jobs later), not extraction-specific. Composite index on `(status, next_retry_at)` for the worker's claim query.
+  - Completed: 2026-07-24
+- **`app/text_extraction/`** — pure, DB-decoupled extractors (`PdfExtractor`, `DocxExtractor`, `XlsxExtractor`, `PptxExtractor`, `PlainTextExtractor`), each a bytes-in/text-out function with zero DB or HTTP knowledge, dispatched via a small extension→extractor `registry.py`. Legacy binary Office formats (`.doc`, `.ppt`, `.xls`) have no reliable pure-Python parser and deliberately resolve to `None` from the registry (→ `ExtractionStatus.UNSUPPORTED`) rather than a bad-faith attempt.
+  - Completed: 2026-07-24
+- **`app/ai_jobs/`** — `AiJobRepository` (enqueue, `claim_batch` via `SELECT ... FOR UPDATE SKIP LOCKED` — the same row-locking pattern already used for version-number allocation — `mark_succeeded`/`mark_failed` with exponential backoff capped at 5 attempts) and `worker.py` (`run_once`/`run_forever`, a pluggable `job_type → handler` registry). Deliberately not wired into `main.py` or app startup — runs as its own process once a real handler exists to register.
+  - Completed: 2026-07-24
+  - Notes: **The first pytest suite in this project** (`tests/text_extraction/test_extractors.py`, 6 tests) — `tests/` had been empty since Phase 2. Each format's extractor is tested against a real, in-memory fixture generated with that format's own writer library (`python-docx`, `openpyxl`, `python-pptx`) rather than committing binary fixture files; the PDF case uses `pypdf.PdfWriter` to build a real, valid, blank PDF and confirms the extractor handles it without raising (pypdf's own read-path correctness isn't re-tested — that's a well-tested third-party concern). Added `[tool.pytest.ini_options]` to `pyproject.toml` (`pythonpath = ["."]`) since this was the first test that needed to import `app.*` at all. `mypy`/`ruff` both clean on all new code (added `types-openpyxl` as a dev dependency to close the one stub gap); the live dev server, migration, and a direct DB/registry smoke check were all re-verified after wiring. **What's explicitly deferred:** the extraction *service* that actually orchestrates registry-dispatch → run extractor → write `.txt` via `StoragePort` → upsert the DB row (register the worker's first real `AiJobType.EXTRACT` handler), the enqueue hook into `documents/service.py`/`versions/service.py`'s existing upload transactions, and hard-delete cleanup for the `.txt` sibling — all planned as the very next increment, not forgotten.
+
 ---
 
 ## 4. Pending Features
@@ -342,7 +357,8 @@ DocBrain/
 │   ├── alembic/
 │   │   └── versions/
 │   │       ├── d3070d18c042_initial_schema.py
-│   │       └── e97f9d207d17_fix_restored_from_version_id_ondelete_.py
+│   │       ├── e97f9d207d17_fix_restored_from_version_id_ondelete_.py
+│   │       └── a8e785ca1e16_add_document_extracted_text_and_ai_jobs_.py
 │   ├── app/
 │   │   ├── main.py                 # FastAPI app, middleware, router registration
 │   │   ├── core/                   # config, security (JWT), dependencies, exceptions,
@@ -350,7 +366,8 @@ DocBrain/
 │   │   ├── db/
 │   │   │   ├── base.py / session.py
 │   │   │   └── models/             # user, category, document, document_version, tag,
-│   │   │                           # activity_event, user_preference, enums
+│   │   │                           # activity_event, user_preference, ai_job,
+│   │   │                           # document_extracted_text, enums
 │   │   ├── schemas/                # Pydantic DTOs: auth, document, version, taxonomy,
 │   │   │                           # review, trash, dashboard, mappers.py (ORM → DTO)
 │   │   ├── modules/                # package-by-feature
@@ -363,13 +380,24 @@ DocBrain/
 │   │   │   ├── reviews/             (router, service, repository)
 │   │   │   └── dashboard/           (router, service, repository)
 │   │   ├── storage/                 # StoragePort, LocalFileSystemStorage, checksum
+│   │   ├── text_extraction/         # AI feature track (pre-Gemini) — pure, DB-decoupled
+│   │   │   ├── port.py              #   TextExtractor protocol, ExtractionResult
+│   │   │   ├── extractors/          #   pdf, docx, xlsx, pptx, plain
+│   │   │   └── registry.py          #   extension -> (extractor, ExtractionMethod)
+│   │   ├── ai_jobs/                 # AI feature track — shared background job queue
+│   │   │   ├── repository.py        #   enqueue, claim_batch (SKIP LOCKED), mark_succeeded/failed
+│   │   │   └── worker.py            #   run_once/run_forever, pluggable job_type -> handler
 │   │   └── utils/                   # file_validation, slugify
 │   ├── scripts/
 │   │   └── seed.py
-│   ├── tests/                       # empty — no automated tests yet
+│   ├── tests/
+│   │   └── text_extraction/
+│   │       └── test_extractors.py   # first pytest suite in the project (6 tests)
 │   └── uploads/                     # local file storage (gitignored contents)
 │       ├── tmp/
-│       └── documents/{document_id}/v{n}__{slugified-filename}
+│       └── documents/{document_id}/
+│           ├── v{n}__{slugified-filename}       # source file
+│           └── v{n}__{slugified-filename}.txt   # extracted text sibling, once Step 5 wires it
 │
 └── frontend/
     ├── package.json / components.json
@@ -456,7 +484,7 @@ DocBrain/
 
 **Hosted on:** Supabase Postgres (free tier), accessed directly via SQLAlchemy — no PostgREST/client SDK.
 
-### Tables (8)
+### Tables (10)
 
 | Table | Purpose |
 |---|---|
@@ -467,6 +495,8 @@ DocBrain/
 | `tags` / `document_tags` | Normalised tags + join table (composite PK) |
 | `activity_events` | Append-only audit trail |
 | `user_preferences` | Theme, page size |
+| `document_extracted_text` | *(AI feature track, pre-Gemini)* One row per `document_version_id` (unique FK) — a pointer (`extracted_text_path`) + status/method/char_count/error, never the text content itself. Content lives on disk as a `.txt` sibling of the source file. |
+| `ai_jobs` | *(AI feature track)* Shared background-work queue — `job_type`/`status`/`attempt_count`/`next_retry_at`. Designed for reuse by every future AI stage (extraction today; embedding/suggestion jobs later), not extraction-specific. |
 
 ### Relationships
 
@@ -475,11 +505,13 @@ DocBrain/
 - `documents` ↔ `document_versions` — circular reference (`current_version_id` → a version; `document_id` → parent doc), resolved via `use_alter` FK added after both tables exist
 - `documents` ↔ `tags` via `document_tags` — M:N, CASCADE from either side
 - `document_versions.restored_from_version_id` — self-referential, `ON DELETE SET NULL` (fixed from the default RESTRICT — see Known Issues)
+- `document_versions` → `document_extracted_text` / `ai_jobs` — 1:1 / 1:N, both `ON DELETE CASCADE` — hard-deleting a document cascades away extraction metadata and any pending jobs for free at the DB level; the `.txt` file on disk still needs an explicit `storage.delete()` call (planned, not yet wired — see §3's AI Feature Track notes)
 
-### Migrations (2, both applied)
+### Migrations (3, all applied)
 
-1. `d3070d18c042_initial_schema` — all 8 tables, indexes, and the 4 triggers.
+1. `d3070d18c042_initial_schema` — all 8 original tables, indexes, and the 4 triggers.
 2. `e97f9d207d17_fix_restored_from_version_id_ondelete_` — bug fix (see §10 Known Issues).
+3. `a8e785ca1e16_add_document_extracted_text_and_ai_jobs_` — the two new AI-feature-track tables above.
 
 ### Seed Data
 
@@ -502,6 +534,8 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 - Partial index: `documents (updated_at DESC) WHERE status = 'ACTIVE'`
 - Functional unique index: `categories (lower(name))`
 - Unique: `document_versions (document_id, version_number)`
+- Unique: `document_extracted_text (document_version_id)`
+- Composite: `ai_jobs (status, next_retry_at)` — the worker's claim query
 
 ---
 
@@ -517,6 +551,7 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 | Taxonomy | ✅ | ✅ | ✅ | Categories + Tags, admin-only mutations |
 | Reviews | ✅ | ✅ | ✅ | Pending queue, mark-reviewed |
 | Dashboard | ✅ | ✅ | ✅ | Summary + activity feed, now with an optional `documentId` filter (added 2026-07-23 for the Details page's Activity tab) |
+| Text Extraction *(AI track)* | ➖ no router yet | ➖ no orchestration service yet | ✅ `AiJobRepository` | Not a request-facing module — `app/text_extraction/` (pure extractors) + `app/ai_jobs/` (queue + worker) are infrastructure only. `pytest` (6 tests) instead of manual curl verification, since there's no HTTP surface to curl yet. |
 
 - **Middleware:** CORS, correlation-ID (`X-Correlation-Id` on every request/response).
 - **Wire format:** camelCase JSON in and out (`app/schemas/base.py`'s `CamelModel`, plus `alias=` on non-path `Query`/`Form` params) — matches architecture doc §8 exactly. Fixed 2026-07-23; previously the implementation was snake_case despite the doc specifying camelCase. Internal Python code is unaffected (still snake_case attributes/kwargs).
@@ -525,7 +560,7 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 - **File download:** no signed-URL scheme needed after all — the BFF proxy's httpOnly-cookie-to-Bearer-header translation already covers plain browser navigation (same-origin request, cookie sent automatically). Corrected an earlier assumption to the contrary; see §9/§10.
 - **Versioning:** row-locked version-number allocation; append-only; restore creates a new version rather than rewriting history.
 - **Search:** Postgres full-text (`tsvector` + `ts_rank_cd`), trigger-maintained, weighted title > tags > description > category/filename. **Does not** yet index document body content (PDF/DOCX text) — see Pending Features.
-- **Pending for backend:** automated test suite (Phase 6).
+- **Pending for backend:** automated test suite (Phase 6 — one real suite now exists, `tests/text_extraction/`, but it covers only the new AI-track extractors, not the original 20 hackathon-roadmap routes). AI feature track's next increment: the extraction orchestration service (dispatch → run extractor → write `.txt` via `StoragePort` → upsert `document_extracted_text`), the enqueue hook into the existing upload/new-version transactions, and hard-delete cleanup for the `.txt` sibling.
 
 ---
 
@@ -614,6 +649,13 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 - **2026-07-23** (Phase 5) — Chose not to build a bespoke "resolution path" UI (e.g. a "rename or merge instead?" dialog) for the 409 conflict cases beyond the inline field-error mapping. Reasoning: the backend's `fields[]` message already names the exact problem, and re-opening the same still-open dialog with that field flagged already lets the user fix and resubmit without leaving the screen — a reasonable reading of §16.5's "contextual dialog with a resolution path" for a hackathon-scoped app, versus a purpose-built dialog per conflict type, which would be new construction rather than the audit-and-fix pass Phase 5 is scoped as.
 - **2026-07-23** (Phase 5) — Version History's restore-conflict handling (`versions-tab.tsx`) now checks `error.status === 409` specifically (not just `error instanceof ApiError`) before showing the "someone else uploaded a new version" copy, and wires a toast action button to the tab's own `refetch()` rather than just telling the user to refresh manually — the one 409 case in the app where "refresh and see current state" is a genuinely different, more useful resolution than "look at this field."
 - **2026-07-23** (Phase 5) — `frontend/src/app/not-found.tsx` and `error.tsx` reuse the existing `ErrorState`/`EmptyState` visual language (same icon-in-circle + title + description + action layout) rather than a one-off design, so an unmatched route or an uncaught exception still looks like the rest of the app instead of a jarring, unstyled fallback.
+- **2026-07-24** (AI track) — Extracted text is stored on disk (`{version.storage_path}.txt`, via the existing `StoragePort`) with only a path pointer + status/metadata in Postgres (`document_extracted_text`), not the raw text content in a DB column. Reasoning: Supabase's free-tier Postgres has a real, fairly small disk quota that bulk extracted text would compete for; local disk doesn't. This mirrors — not diverges from — how `document_versions` itself already works (a `storage_path` pointer, never file bytes, in the DB). Zero new `StoragePort` methods needed; the extracted-text path is just the version's existing `storage_path` with `.txt` appended, which never collides with the source path even when the source itself is already `.txt` (`v1__notes.txt` vs `v1__notes.txt.txt` are different paths).
+- **2026-07-24** (AI track) — `document_extracted_text` and `ai_jobs` are separate tables, not a column added to `document_versions`. Reasoning: `document_versions` is a strict, append-only audit record elsewhere in this codebase's own design language — bolting a `PENDING`/`FAILED` processing-status lifecycle onto it would be a category error. Extraction has its own lifecycle (pending → succeeded/failed, retryable, with an error message) that has nothing to do with what a version row represents.
+- **2026-07-24** (AI track) — `app/text_extraction/` is deliberately decoupled from the DB. Its `TextExtractor` protocol and `ExtractionResult` know nothing about `ExtractionMethod`/`ExtractionStatus` (the DB-facing enums in `db/models/enums.py`) — a pure bytes-in/text-out function per format, dispatched by a small registry. This is what makes the 6-test suite possible with zero mocking: each extractor is tested against a real, in-memory fixture with no DB or FastAPI involved at all.
+- **2026-07-24** (AI track) — Legacy binary Office formats (`.doc`, `.ppt`, `.xls`) are not supported by the extraction registry — no reliable pure-Python parser exists for them, and pulling in LibreOffice-headless conversion or a paid conversion API just for three extensions already in the app's upload allowlist was judged not worth the operational complexity. The registry returns `None` for them; the (planned) orchestration service maps that to `ExtractionStatus.UNSUPPORTED`, not a retried failure.
+- **2026-07-24** (AI track) — Background AI processing uses a Postgres-backed job queue (`ai_jobs`, claimed via `SELECT ... FOR UPDATE SKIP LOCKED`) rather than Celery/Redis/RabbitMQ. Reasoning: this is the same row-locking pattern the codebase already uses for version-number allocation (`versions/repository.py`'s `get_document_for_update`), and this project's own established philosophy (§9.4 of the architecture doc: no infra beyond what's needed, e.g. rejecting the Supabase client SDK for portability) argues against a dedicated broker at a corpus scale measured in hundreds of documents. Revisit only if job volume genuinely outgrows a simple poll interval.
+- **2026-07-24** (AI track) — `ai_jobs` is one shared queue table with a `job_type` column, not one table per processing stage. Every future AI stage (embedding, metadata suggestion) reuses the same `AiJobRepository.claim_batch`/`mark_succeeded`/`mark_failed` and the same worker's `run_once`, registering a new handler under a new `AiJobType` rather than re-deriving retry/backoff/locking logic per stage.
+- **2026-07-24** (AI track) — The worker (`app/ai_jobs/worker.py`) is built but deliberately not wired into `main.py` or app startup, and has no CLI entrypoint yet. `AiJobType` currently has exactly one value (`EXTRACT`) with no registered handler — Step 5 (the extraction orchestration service) is what gives the worker something real to dispatch to and is when a runnable `python -m app.ai_jobs.worker`-style entrypoint gets added. Building an entrypoint script with an empty handler registry now would just be dead code.
 
 ### Resolved (kept for history — do not delete)
 
@@ -685,6 +727,10 @@ Ask before starting, per standing practice, but there's no longer a choice betwe
 ## 13. Change Log
 
 *(Reverse chronological. Never delete history — always append.)*
+
+### 2026-07-24
+
+- Started the **AI feature track** — "Smart Rename & Auto-Tag," planned and scoped separately from the §19 hackathon roadmap (published as its own phased rollout plan: shadow mode first, `app/ai/` provider-abstraction architecture mirroring `StoragePort`, Postgres job queue, prompt/token strategy, UX). First coded increment: the **text extraction foundation** — deliberately built before any Gemini integration, since extraction has no external API dependency and no subjective quality gate, making it the one safe-to-build-for-real piece with nothing user-facing yet. Added two new tables (`document_extracted_text`: a pointer + status/metadata only, never the text content; `ai_jobs`: a shared background-work queue reusable by every future AI stage), both cascade-deleted from `document_versions`. Extracted text is stored on disk as a `.txt` sibling of the source file via the existing `StoragePort` — zero new storage methods needed — deliberately not as a Postgres text column, both to mirror how `document_versions` itself never stores file bytes in the DB and because Supabase's free-tier disk quota is a real constraint bulk text would compete for. Built `app/text_extraction/` — five pure, DB-decoupled extractors (pdf/docx/xlsx/pptx/plain via `pypdf`/`python-docx`/`openpyxl`/`python-pptx`) dispatched through a small registry; legacy binary Office formats (`.doc`, `.ppt`, `.xls`) are explicitly unsupported, no reliable pure-Python parser exists for them. Built `app/ai_jobs/` — `AiJobRepository` (claim via `SELECT ... FOR UPDATE SKIP LOCKED`, the same row-locking pattern already used for version-number allocation; exponential backoff capped at 5 attempts) and a generic `worker.py` (`run_once`/`run_forever` over a pluggable `job_type → handler` registry) — chosen over Celery/Redis as a deliberately lighter-weight fit for this project's corpus scale and existing "no infra we don't need" philosophy. Wrote **the first pytest suite in this project** (`tests/text_extraction/`, 6 tests, `tests/` had been empty since Phase 2) — each extractor tested against a real in-memory fixture built with that format's own writer library, no committed binary fixtures and no mocking needed given the pure-function design. Added `[tool.pytest.ini_options]` (first test needing to import `app.*`) and `types-openpyxl` (closed the one new mypy stub gap). `mypy`/`ruff` both clean on all new code; migration applied and table shapes confirmed directly against the live DB; the running dev server, model registration, and registry dispatch all re-verified with a live smoke check. **Deliberately deferred, not forgotten:** the orchestration service that actually wires registry → extractor → `StoragePort` → DB row together, the enqueue hook into the existing upload/new-version transactions, hard-delete cleanup for the `.txt` sibling, and everything Gemini-related (all planned as the next increment).
 
 ### 2026-07-23
 
