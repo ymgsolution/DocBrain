@@ -2,7 +2,7 @@
 
 > **This is the single source of truth for the project.** It must be updated whenever a feature is added, modified, refactored, removed, or completed. See [Important Rules](#important-rules) at the bottom.
 
-**Last updated:** 2026-07-23 (Phase 4.5 — Document Details)
+**Last updated:** 2026-07-23 (Phase 4.6 — Version History)
 
 ---
 
@@ -29,7 +29,7 @@ Full architecture rationale lives in [docs/DOCBRAIN-ARCHITECTURE.md](docs/DOCBRA
 - ✅ Backend Foundation
 - ✅ Backend APIs (all modules from §9.1 of the architecture doc are built and manually verified)
 - 🟨 Testing (extensive manual/curl verification done per-feature on the backend; browser-driven Playwright smoke test done for the shell; no automated `pytest`/component-test suite yet — that's Phase 6 in the roadmap)
-- 🟨 Frontend (Phase 4.1 — Application Shell — complete. Phase 4.2 — Dashboard — complete. Phase 4.3 — Document Explorer — complete. Phase 4.4 — Upload Document — complete. Phase 4.5 — Document Details — complete: header/action bar, Overview tab with inline edit mode, Versions tab (read-only — restore/new-version land in 4.6), Activity tab, preview pane, mark-as-reviewed, delete-with-undo, all verified end-to-end in a real browser. Found and fixed a real pre-existing bug in the BFF proxy along the way (see §10). Phases 4.6–4.9 — Version History actions, Categories, Tags, Settings — not started)
+- 🟨 Frontend (Phase 4.1 — Application Shell — complete. Phase 4.2 — Dashboard — complete. Phase 4.3 — Document Explorer — complete. Phase 4.4 — Upload Document — complete. Phase 4.5 — Document Details — complete. Phase 4.6 — Version History — complete: restore-this-version (with the required two-version consequence dialog) and upload-new-version, closing out the Versions tab. Document Details / Version History as originally scoped (S5–S6) is now fully done. Verified end-to-end in a real browser. Phases 4.7–4.9 — Categories, Tags, Settings — not started)
 - ⬜ Deployment
 
 ---
@@ -224,18 +224,29 @@ Full architecture rationale lives in [docs/DOCBRAIN-ARCHITECTURE.md](docs/DOCBRA
   - Completed: 2026-07-23
   - Notes: Verified end-to-end with headless-Chromium Playwright: view → edit → save, mark-as-reviewed with note, Versions tab (Current badge, download), Activity tab (all real events including the test's own trash/restore cycles, proving the audit trail is genuine), 404 state for a bogus ID, soft-delete → redirect → toast → Undo → document accessible again, and an Employee persona correctly missing Mark-as-reviewed/Edit for a document they don't own. Zero console errors beyond expected 404s/401 from the deliberately-bogus-ID and post-logout test steps. Test-induced description clutter and Supabase network-latency-driven flakiness in early test runs were both diagnosed and aren't real bugs (see notes above and §10). TypeScript, ESLint, and `next build` all clean.
 
+### Frontend — Version History (Phase 4.6)
+
+- **`documentsApi.uploadVersion`/`restoreVersion`** — the two actions deliberately left out of the Versions tab in Phase 4.5. A shared `xhrUpload<T>()` helper was factored out of `documentsApi.create` (Phase 4.4) and `uploadVersion`, since both need the same XMLHttpRequest-for-progress mechanics — avoids the "duplicate logic" anti-pattern.
+  - Completed: 2026-07-23
+- **Upload new version** — added to the header's action bar (Download, **Upload new version**, Mark as reviewed, Edit, Delete), per §6.5 rather than buried in the Versions tab; gated on the same owner-or-Reviewer/Admin rule as Edit (matches the backend's `_assert_can_upload_version` exactly, which is identical to `_assert_can_edit`). `UploadVersionDialog` — dropzone (reused `UploadDropzone`) + required change note (mirrors the backend's 5-character minimum) + determinate progress bar — reuses the same XHR pattern from Upload, lazy-loaded via `next/dynamic` from the header.
+  - Completed: 2026-07-23
+- **Restore this version** — a Restore button on every non-current Versions-tab row (hidden on Current, per §6.6), reusing the existing `ConfirmDialog` from Phase 4.1 rather than a new component. The confirmation text names both version numbers explicitly, per §6.6's requirement ("Restore version 1? This creates a new version using version 1's content and replaces version 2 as current.").
+  - Completed: 2026-07-23
+  - Notes: Verified end-to-end with headless-Chromium Playwright against a throwaway test document (not the seed corpus — `DocumentVersion` rows are append-only with no delete endpoint, so testing against seed data would have permanently inflated its version count and the Dashboard's `versionsTracked` total): upload-new-version → v2 becomes current, restore v1 → v3 created and becomes current with `changeNote` "Restored from version 1", Current badge and Restore-button visibility both correct at every step, Activity tab shows both the `VERSION_UPLOADED` and `VERSION_RESTORED` events, and an Employee persona correctly sees neither action. One apparent bug (header still showing the pre-restore version badge in a screenshot) turned out to be the same Supabase network-latency timing already documented elsewhere, not a caching bug — confirmed by reloading fresh, which showed the correct version immediately. The throwaway document was hard-deleted afterward via the API; `totalDocuments`/`versionsTracked` confirmed back at the documented baseline (53 / 99). TypeScript, ESLint, and `next build` all clean.
+
 ---
 
 ## 4. Pending Features
 
 ### High Priority
 
-- Version History actions (S6, Phase 4.6) — restore-this-version and upload-new-version on the Versions tab, next up
+- Categories admin UI (S9, Phase 4.7), next up
+- Tags admin UI (S9, Phase 4.8)
 
 ### Medium Priority
 
 - Automated backend test suite (`pytest`) — unit tests for permission checks, version allocation, search ranking; one integration test covering the full upload→version→search→download loop (roadmap Phase 6)
-- Pending Reviews UI, Trash UI, Categories/Tags admin UI (S6–S9)
+- Pending Reviews UI, Trash UI (S6, S8)
 - Settings screen (S10)
 
 ### Low Priority
@@ -442,12 +453,12 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 | Dashboard | ✅ Done — KPIs, category distribution, recently-added/accessed, expiring-soon, role-gated pending-reviews banner, activity feed, all live-data |
 | Upload | ✅ Done — drag-and-drop dropzone, creatable tag input, RHF+Zod metadata form, determinate progress bar (XHR), non-dismissible mid-upload, client-side pre-validation, topbar button wired |
 | Explorer | ✅ Done — URL-driven filters (search/category/review-status/tags/sort), table + mobile list, pagination, empty/error/loading states, topbar search wired up |
-| Document Details | ✅ Done — header/action bar (role-gated), Overview tab with inline edit, Versions tab (read-only), Activity tab, PDF/image/text preview, mark-as-reviewed, delete-with-undo, 404 state |
-| Version History | 🟨 Read-only version table done (Phase 4.5); restore-this-version and upload-new-version are Phase 4.6 |
+| Document Details | ✅ Done — header/action bar (role-gated), Overview tab with inline edit, Activity tab, PDF/image/text preview, mark-as-reviewed, delete-with-undo, 404 state |
+| Version History | ✅ Done — version table, restore-this-version (with the two-version consequence dialog), upload-new-version, all role-gated |
 | Search | ✅ Done — full-text search via the Explorer's search box (in-page, debounced) and the topbar's global search box (submit-triggered, from anywhere in the app) |
-| Responsive Design | ✅ Verified for the shell, Dashboard, Explorer, Upload dialog, and now Document Details |
+| Responsive Design | ✅ Verified for the shell, Dashboard, Explorer, Upload dialog, and Document Details / Version History |
 
-**What exists:** Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + shadcn/ui (Base UI primitives) + TanStack Query + React Hook Form + Zod + next-themes, fully wired: design tokens, API layer, BFF proxy, auth guard, login, app shell, a live Dashboard, a live Document Explorer, a live Upload flow, and a live Document Details page all working end-to-end — verified with headless-Chromium Playwright scripts (shell: 10-step flow; dashboard: full-content check across Admin/Employee personas, dark mode, tablet, mobile; Explorer: filters, pagination, row navigation, empty state, mobile layout; Upload: a real file upload through the full form, progress bar, success toast, cache invalidation; Details: view/edit/save, mark-as-reviewed, versions, activity, 404, soft-delete-with-undo, role-gating), not just code review. Production build (`next build`) succeeds cleanly; TypeScript and ESLint are both clean.
+**What exists:** Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + shadcn/ui (Base UI primitives) + TanStack Query + React Hook Form + Zod + next-themes, fully wired: design tokens, API layer, BFF proxy, auth guard, login, app shell, a live Dashboard, a live Document Explorer, a live Upload flow, and a live Document Details + Version History page all working end-to-end — verified with headless-Chromium Playwright scripts (shell: 10-step flow; dashboard: full-content check across Admin/Employee personas, dark mode, tablet, mobile; Explorer: filters, pagination, row navigation, empty state, mobile layout; Upload: a real file upload through the full form, progress bar, success toast, cache invalidation; Details: view/edit/save, mark-as-reviewed, activity, 404, soft-delete-with-undo, role-gating; Version History: upload-new-version, restore-this-version, both against a throwaway test document to avoid corrupting the seed corpus's version counts), not just code review. Production build (`next build`) succeeds cleanly; TypeScript and ESLint are both clean.
 
 ---
 
@@ -488,6 +499,10 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 - **2026-07-23** — `GET /dashboard/activity` grew an optional `documentId` filter rather than a new per-document-activity endpoint — reuses the existing schema/repository/router, since Document Details' Activity tab needs exactly the same shape the Dashboard already returns, just scoped to one document.
 - **2026-07-23** — Document Details' Versions tab is read-only this phase (Download only); restore-this-version and upload-new-version are deliberately deferred to Phase 4.6 (Version History) per the module order, not an oversight.
 - **2026-07-23** — `DocumentPreview`'s inline-vs-fallback decision (`isPreviewable()`) hard-mirrors the backend's own `_resolve_disposition` eligibility list (`versions/router.py`: `application/pdf`, `text/plain`, any `image/*`) — the frontend must never attempt an inline preview for a type the backend would force to `attachment` anyway.
+- **2026-07-23** — "Upload new version" lives in the Document Details header's action bar, not the Versions tab, per §6.5's explicit action-bar list (Download, Upload new version, Edit, Delete) — matches the doc rather than an intuitive-but-undocumented alternative placement.
+- **2026-07-23** — `xhrUpload<T>()` factored out of `documentsApi.create`/`uploadVersion` once a second call site needed identical XMLHttpRequest-for-progress mechanics — avoids duplicating the same ~20 lines twice.
+- **2026-07-23** — Restore-this-version's confirmation reuses the existing `ConfirmDialog` (parametrized `description` text) rather than a new dialog component — §6.6 only requires naming both version numbers in the copy, which a dynamic description string satisfies without new UI.
+- **2026-07-23** — Version-history mutations (restore, upload-new-version) are tested against a throwaway document created via Upload, never the seed corpus — `DocumentVersion` rows are append-only with no delete endpoint, so testing against seed data would permanently inflate its version count.
 
 ---
 
@@ -517,12 +532,14 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 - **Search doesn't cover document body text.** `search_vector` indexes title, description, tags, category name, and current filename — not the actual PDF/DOCX content (FR-22, deferred).
 - **No duplicate-upload detection.** SHA-256 checksums are computed and stored per version, but nothing checks "does this content already exist?" and warns the user (FR-21, deferred).
 - **PDF preview can't be visually verified in headless-Chromium Playwright testing** — the bundled headless Chromium has no active PDF-viewer plugin, so the iframe renders blank in automated screenshots even though the underlying response is a valid PDF with correct headers (verified by fetching the URL directly). Not a product bug — renders normally in every real browser — but means this one feature's visual correctness relies on the direct-fetch check rather than a screenshot, worth remembering if it's ever re-verified.
+- **Testing version-history mutations (restore, upload-new-version) requires a throwaway document, not the seed corpus.** `DocumentVersion` rows are append-only with no delete endpoint, so any test upload/restore against a seeded document permanently inflates its version count and the Dashboard's `versionsTracked` total. Established pattern going forward: create a test document via Upload, test against it, hard-delete it afterward — never mutate versions on seed documents.
 
 ---
 
 ## 11. Next Immediate Tasks
 
-1. Build Version History actions (S6, Phase 4.6), next up — restore-this-version (with the explicit two-version consequence dialog §6.6 requires) and upload-new-version on the Versions tab already built in 4.5. `UploadDropzone` from Upload is reusable for the new-version file picker.
+1. Build the Categories admin screen (S9, Phase 4.7), next up — table (name, description, usage count, status), New/Edit/Archive, Delete disabled with a tooltip while in use. `taxonomyApi.categories` list already exists from the Explorer's filter dropdown; this phase adds the create/update/archive mutations.
+2. Build the Tags admin screen (S9, Phase 4.8) — table sorted by usage, Rename, Merge-into (dialog stating how many documents are affected), Delete only at usage = 0.
 
 ---
 
@@ -551,6 +568,7 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 
 ### 2026-07-23
 
+- Completed **Phase 4.6 (Version History)** — the two actions deliberately deferred from Phase 4.5: "Upload new version" added to the header's action bar (dropzone + required change note + determinate progress bar, lazy-loaded dialog) and "Restore this version" on every non-current Versions-tab row (reusing `ConfirmDialog`, confirmation names both version numbers per §6.6). Factored a shared `xhrUpload<T>()` helper out of the now-two call sites needing XMLHttpRequest-for-progress. This closes out Document Details / Version History (S5–S6) as originally scoped. Verified end-to-end with headless-Chromium Playwright against a throwaway test document — never the seed corpus, since `DocumentVersion` rows are append-only with no delete endpoint and would permanently inflate the seed's version counts: upload-new-version, restore, Current-badge/Restore-button visibility at every step, both activity events, and Employee-role gating. Confirmed the seed corpus's documented baseline (53 documents, 99 versions) was unaffected after cleanup. TypeScript, ESLint, and `next build` all clean.
 - Completed **Phase 4.5 (Document Details)** — header/role-gated action bar, Overview tab with inline edit mode (reusing `TagInput` from Upload), a read-only Versions tab, an Activity tab, PDF/image/text preview, mark-as-reviewed, and delete-with-undo. Found and fixed two real architectural gaps before implementing: (1) corrected an earlier assumption that downloads needed a signed-URL scheme — they don't, the BFF proxy's cookie-to-Bearer translation already covers plain links; the actual fix was forwarding `Content-Disposition`/`X-Content-Type-Options` through the generic proxy, which it was silently dropping; (2) added an optional `documentId` filter to the existing `GET /dashboard/activity` endpoint for the Activity tab, reusing the schema rather than adding a new route. Also found and fixed a **real, previously-latent bug via browser testing**: the BFF proxy crashed with a 500 on any 204 No Content response (the Fetch spec forbids a body on null-body-status Responses) — `DELETE /documents/{id}` was the first 204 this proxy ever had to forward, so the bug had been dormant since Phase 4.1. Verified end-to-end with headless-Chromium Playwright: view→edit→save, mark-as-reviewed, versions table, activity feed (including the test's own trash/restore cycle, proving the audit trail is genuine), a 404 state, soft-delete→redirect→toast→Undo→restored, and Employee-role gating. PDF preview correctness was confirmed by fetching the content URL directly (valid 5-page PDF, correct headers) rather than a screenshot, since headless Chromium has no PDF-viewer plugin — not a product bug. TypeScript, ESLint, and `next build` all clean.
 - Completed **Phase 4.4 (Upload Document)** — a single unified upload modal per architecture doc §6.3 (correcting my own earlier "two-step stepper" mischaracterization), built from a new `UploadDropzone` (shared) and `TagInput` (creatable, distinct from the Explorer's filter-only `TagFilterCombobox`). `documentsApi.create()` uses `XMLHttpRequest` for a real determinate progress bar (`fetch` can't observe upload progress). Non-dismissible mid-upload via a single `onOpenChange` guard that covers Escape/outside-click/close-button/Cancel uniformly. Client-side extension/size pre-validation mirrors the backend's `core/config.py` defaults. Topbar's Upload button is now fully wired (both topbar buttons — search and upload — are live as of this phase). Verified end-to-end with headless-Chromium Playwright using a real file upload: validation-disabled submit button, auto-filled title, category selection, tag creation (existing + brand-new), progress bar, success toast, dialog auto-close, the new document appearing in the Explorer and the Dashboard's activity feed (cache invalidation confirmed, not assumed), and a rejected unsupported file type — zero console errors. Test artifacts deleted afterward via the API so the seed corpus stays at its documented 53-document baseline. TypeScript, ESLint, and `next build` all clean.
 - Completed **Phase 4.3 (Document Explorer)** — `documentsApi` + `taxonomyApi` feature modules, URL-driven filter state (search/category/review-status/tags/sort/page — the same query params the Dashboard already links to), a debounced `SearchBox` and `PaginationBar` (new shared components), a `TagFilterCombobox`, a desktop `DocumentsTable` collapsing to a mobile stacked list below `lg`, and the topbar's search box wired up for real. Verified end-to-end with headless-Chromium Playwright: filters, pagination, row navigation, empty state for a nonsense query, and mobile layout — zero console errors except the expected 404 from clicking into `/documents/{id}` (Phase 4.5, not yet built). Found and fixed one real Base UI gotcha along the way — `Select.Value` needs an explicit label-lookup render function; it doesn't auto-derive labels from `SelectItem` children like Radix does. TypeScript, ESLint, and `next build` all clean.
