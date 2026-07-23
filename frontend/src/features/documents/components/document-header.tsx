@@ -1,4 +1,4 @@
-import { ClipboardCheck, Pencil, Trash2 } from "lucide-react";
+import { ClipboardCheck, FilePlus2, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FileTypeIcon } from "@/components/shared/file-type-icon";
 import { ReviewStatusBadge } from "@/components/shared/status-badge";
@@ -14,9 +14,18 @@ interface DocumentHeaderProps {
   onEdit: () => void;
   onDelete: () => void;
   onMarkReviewed: () => void;
+  onUploadVersion: () => void;
 }
 
-export function DocumentHeader({ document, currentUser, editing, onEdit, onDelete, onMarkReviewed }: DocumentHeaderProps) {
+export function DocumentHeader({
+  document,
+  currentUser,
+  editing,
+  onEdit,
+  onDelete,
+  onMarkReviewed,
+  onUploadVersion,
+}: DocumentHeaderProps) {
   const canEdit = document.owner.id === currentUser.id || currentUser.role === "REVIEWER" || currentUser.role === "ADMIN";
   const canDelete = document.owner.id === currentUser.id || currentUser.role === "ADMIN";
   const canMarkReviewed = currentUser.role === "REVIEWER" || currentUser.role === "ADMIN";
@@ -49,6 +58,12 @@ export function DocumentHeader({ document, currentUser, editing, onEdit, onDelet
               versionNumber={document.currentVersion.versionNumber}
               filename={document.currentVersion.originalFilename}
             />
+          )}
+          {canEdit && (
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={onUploadVersion}>
+              <FilePlus2 className="size-4" />
+              Upload new version
+            </Button>
           )}
           {canMarkReviewed && (
             <Button variant="outline" size="sm" className="gap-1.5" onClick={onMarkReviewed}>

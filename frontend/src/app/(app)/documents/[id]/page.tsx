@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { AppBreadcrumb } from "@/components/layout/app-breadcrumb";
@@ -21,6 +22,11 @@ import { MarkReviewedDialog } from "@/features/documents/components/mark-reviewe
 import { VersionsTab } from "@/features/documents/components/versions-tab";
 import { DocumentActivityTab } from "@/features/documents/components/activity-tab";
 
+const UploadVersionDialog = dynamic(
+  () => import("@/features/documents/components/upload-version-dialog").then((m) => m.UploadVersionDialog),
+  { ssr: false },
+);
+
 export default function DocumentDetailsPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -32,6 +38,7 @@ export default function DocumentDetailsPage() {
   const [editing, setEditing] = useState(false);
   const [markReviewedOpen, setMarkReviewedOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [uploadVersionOpen, setUploadVersionOpen] = useState(false);
 
   function handleDelete() {
     softDelete.mutate(undefined, {
@@ -83,6 +90,8 @@ export default function DocumentDetailsPage() {
     );
   }
 
+  const canManageVersions = document.owner.id === user.id || user.role === "REVIEWER" || user.role === "ADMIN";
+
   return (
     <div className="space-y-6">
       <AppBreadcrumb segments={[{ label: "Documents", href: "/documents" }, { label: document.title }]} />
@@ -94,6 +103,7 @@ export default function DocumentDetailsPage() {
         onEdit={() => setEditing(true)}
         onDelete={() => setDeleteOpen(true)}
         onMarkReviewed={() => setMarkReviewedOpen(true)}
+        onUploadVersion={() => setUploadVersionOpen(true)}
       />
 
       <Tabs defaultValue="overview">
@@ -117,7 +127,7 @@ export default function DocumentDetailsPage() {
         </TabsContent>
 
         <TabsContent value="versions" className="mt-4">
-          <VersionsTab documentId={document.id} />
+          <VersionsTab documentId={document.id} canManageVersions={canManageVersions} />
         </TabsContent>
 
         <TabsContent value="activity" className="mt-4">
@@ -126,6 +136,10 @@ export default function DocumentDetailsPage() {
       </Tabs>
 
       <MarkReviewedDialog documentId={document.id} open={markReviewedOpen} onOpenChange={setMarkReviewedOpen} />
+
+      {uploadVersionOpen && (
+        <UploadVersionDialog documentId={document.id} open={uploadVersionOpen} onOpenChange={setUploadVersionOpen} />
+      )}
 
       <ConfirmDialog
         open={deleteOpen}
