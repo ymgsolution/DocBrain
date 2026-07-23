@@ -39,8 +39,7 @@ export function TagInput({ value, onChange }: TagInputProps) {
 
   const suggestions = (existingTags ?? [])
     .filter((tag) => !selectedSet.has(normalized(tag.name)))
-    .filter((tag) => !text || tag.name.toLowerCase().includes(text.toLowerCase()))
-    .slice(0, 6);
+    .filter((tag) => !text || tag.name.toLowerCase().includes(text.toLowerCase()));
 
   const exactMatch = suggestions.some((tag) => normalized(tag.name) === normalized(text));
   const showDropdown = focused && value.length < MAX_TAGS && (suggestions.length > 0 || (text && !exactMatch));
@@ -86,7 +85,7 @@ export function TagInput({ value, onChange }: TagInputProps) {
         </InputGroup>
 
         {showDropdown && (
-          <div className="bg-popover text-popover-foreground ring-foreground/10 absolute top-full left-0 z-10 mt-1 w-full max-w-64 rounded-lg p-1 text-sm shadow-md ring-1">
+          <div className="bg-popover text-popover-foreground ring-foreground/10 absolute top-full left-0 z-10 mt-1 max-h-56 w-full max-w-64 overflow-y-auto rounded-lg p-1 text-sm shadow-md ring-1">
             {suggestions.map((tag) => (
               <button
                 key={tag.id}
