@@ -2,8 +2,9 @@ import { AlertCircle, CheckCircle2, Clock } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import type { ReviewStatus } from "@/types/document";
 
-export type ReviewStatus = "ok" | "due_soon" | "overdue";
+export type { ReviewStatus };
 
 const REVIEW_STATUS_CONFIG: Record<ReviewStatus, { label: string; icon: LucideIcon; className: string }> = {
   ok: {
