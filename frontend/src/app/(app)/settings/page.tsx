@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCurrentUser, usePreferences, useUpdatePreferences } from "@/features/auth/hooks";
+import { ApiError } from "@/lib/api-client";
 import type { ThemePreference } from "@/features/auth/types";
 
 const THEME_LABELS: Record<ThemePreference, string> = {
@@ -42,7 +43,11 @@ export default function SettingsPage() {
     setTheme(value);
     updatePreferences.mutate(
       { theme: value },
-      { onError: () => toast.error("Couldn't save your theme preference, try again.") },
+      {
+        onError: (error) => {
+          toast.error(error instanceof ApiError ? error.message : "Couldn't save your theme preference, try again.");
+        },
+      },
     );
   }
 
@@ -51,7 +56,9 @@ export default function SettingsPage() {
       { defaultPageSize: value },
       {
         onSuccess: () => toast.success("Default page size updated"),
-        onError: () => toast.error("Couldn't save this preference, try again."),
+        onError: (error) => {
+          toast.error(error instanceof ApiError ? error.message : "Couldn't save this preference, try again.");
+        },
       },
     );
   }

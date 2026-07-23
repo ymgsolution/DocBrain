@@ -3,6 +3,7 @@
 import { Monitor, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -11,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useUpdatePreferences } from "@/features/auth/hooks";
+import { ApiError } from "@/lib/api-client";
 import type { ThemePreference } from "@/features/auth/types";
 
 export function ThemeToggle() {
@@ -28,7 +30,14 @@ export function ThemeToggle() {
   // survives to the next login, same control the Settings page uses.
   function handleSetTheme(value: ThemePreference) {
     setTheme(value);
-    updatePreferences.mutate({ theme: value });
+    updatePreferences.mutate(
+      { theme: value },
+      {
+        onError: (error) => {
+          toast.error(error instanceof ApiError ? error.message : "Couldn't save your theme preference, try again.");
+        },
+      },
+    );
   }
 
   return (

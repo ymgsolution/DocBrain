@@ -29,6 +29,7 @@ import { useCreateDocument } from "@/features/documents/hooks";
 import { validateUploadFile } from "@/lib/upload-constants";
 import { formatFileSize } from "@/lib/format";
 import { ApiError } from "@/lib/api-client";
+import { applyApiFieldErrors } from "@/lib/form-errors";
 
 const uploadSchema = z.object({
   title: z.string().min(3, "Title must be at least 3 characters").max(200),
@@ -111,11 +112,8 @@ export function UploadDocumentDialog({ open, onOpenChange }: UploadDocumentDialo
           onOpenChange(false);
         },
         onError: (error) => {
-          if (error instanceof ApiError) {
-            toast.error(error.message);
-          } else {
-            toast.error("Upload failed — nothing was saved, retry?");
-          }
+          if (applyApiFieldErrors(form, error)) return;
+          toast.error(error instanceof ApiError ? error.message : "Upload failed — nothing was saved, retry?");
         },
       },
     );

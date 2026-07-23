@@ -66,6 +66,7 @@ export default function DocumentDetailsPage() {
         <ErrorState
           title={notFound ? "Document not found" : "Something went wrong"}
           message={error instanceof ApiError ? error.message : undefined}
+          correlationId={error instanceof ApiError ? error.correlationId : undefined}
           onRetry={notFound ? undefined : () => refetch()}
         />
         <div className="flex justify-center">

@@ -30,6 +30,7 @@ export function VersionsTab({ documentId, canManageVersions }: VersionsTabProps)
     return (
       <ErrorState
         message={error instanceof ApiError ? error.message : "Couldn't load version history."}
+        correlationId={error instanceof ApiError ? error.correlationId : undefined}
         onRetry={() => refetch()}
       />
     );
@@ -60,11 +61,20 @@ export function VersionsTab({ documentId, canManageVersions }: VersionsTabProps)
         setRestoreTarget(null);
       },
       onError: (error) => {
-        toast.error(
-          error instanceof ApiError
-            ? error.message
-            : "Someone uploaded a new version while you were viewing this — refresh and retry.",
-        );
+        // A 409 here means someone else uploaded/restored a version between
+        // this tab loading and the restore click — the version list this
+        // dialog was built from is now stale, so offer a way to fix that
+        // directly rather than a bare error (§16.5's 409 row: a resolution
+        // path, not just a message). Previously this branch was inverted —
+        // it fired on non-ApiError (network failure) instead of the real
+        // conflict case, so a genuine 409 fell through to a plain toast.
+        if (error instanceof ApiError && error.status === 409) {
+          toast.error("Someone uploaded a new version while you were viewing this.", {
+            action: { label: "Refresh", onClick: () => refetch() },
+          });
+        } else {
+          toast.error(error instanceof ApiError ? error.message : "Couldn't restore this version, try again.");
+        }
         setRestoreTarget(null);
       },
     });

@@ -64,6 +64,7 @@ export default function TagsAdminPage() {
       {isError ? (
         <ErrorState
           message={error instanceof ApiError ? error.message : "Couldn't load tags."}
+          correlationId={error instanceof ApiError ? error.correlationId : undefined}
           onRetry={() => refetch()}
         />
       ) : isLoading || !tags ? (

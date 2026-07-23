@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { useCreateCategory, useUpdateCategory } from "@/features/taxonomy/hooks";
 import { ApiError } from "@/lib/api-client";
+import { applyApiFieldErrors } from "@/lib/form-errors";
 import type { Category } from "@/features/taxonomy/types";
 
 const categorySchema = z.object({
@@ -69,6 +70,7 @@ export function CategoryFormDialog({ open, onOpenChange, category }: CategoryFor
         onOpenChange(false);
       },
       onError: (error) => {
+        if (applyApiFieldErrors(form, error)) return;
         toast.error(error instanceof ApiError ? error.message : "Couldn't save this category, try again.");
       },
     });

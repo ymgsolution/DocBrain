@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { authApi } from "./api";
 import type { LoginRequest, UserPreferencesUpdate } from "./types";
 
@@ -50,6 +51,12 @@ export function useLogout() {
       queryClient.clear();
       router.push("/login");
       router.refresh();
+    },
+    // authApi.logout() can still reject on a genuine network failure (the
+    // fetch itself throwing) — without this, that case failed silently with
+    // no feedback at all.
+    onError: () => {
+      toast.error("Couldn't sign out — check your connection and try again.");
     },
   });
 }

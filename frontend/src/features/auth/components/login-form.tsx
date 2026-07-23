@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError } from "@/lib/api-client";
+import { applyApiFieldErrors } from "@/lib/form-errors";
 import { getInitials } from "@/lib/format";
 import { usePersonas, useLogin } from "@/features/auth/hooks";
 
@@ -28,7 +29,10 @@ export function LoginForm() {
   });
 
   function onSubmit(values: LoginValues) {
-    login.mutate({ email: values.email });
+    login.mutate(
+      { email: values.email },
+      { onError: (error) => applyApiFieldErrors(form, error) },
+    );
   }
 
   const errorMessage = getErrorMessage(login.error);

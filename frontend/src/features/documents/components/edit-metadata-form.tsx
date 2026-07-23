@@ -14,6 +14,7 @@ import { TagInput } from "@/features/documents/components/tag-input";
 import { useCategories } from "@/features/taxonomy/hooks";
 import { useUpdateDocument } from "@/features/documents/hooks";
 import { ApiError } from "@/lib/api-client";
+import { applyApiFieldErrors } from "@/lib/form-errors";
 import type { DocumentDetail } from "@/types/document";
 
 const editSchema = z.object({
@@ -63,6 +64,7 @@ export function EditMetadataForm({ document, onDone }: EditMetadataFormProps) {
           onDone();
         },
         onError: (error) => {
+          if (applyApiFieldErrors(form, error)) return;
           toast.error(error instanceof ApiError ? error.message : "Couldn't save changes, try again.");
         },
       },
@@ -103,6 +105,9 @@ export function EditMetadataForm({ document, onDone }: EditMetadataFormProps) {
                 </Select>
               )}
             />
+            {form.formState.errors.categoryId && (
+              <p className="text-destructive text-xs">{form.formState.errors.categoryId.message}</p>
+            )}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="edit-review-date">Review due date</Label>

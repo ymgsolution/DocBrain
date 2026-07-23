@@ -13,6 +13,7 @@ export function DocumentActivityTab({ documentId }: { documentId: string }) {
     return (
       <ErrorState
         message={error instanceof ApiError ? error.message : "Couldn't load activity."}
+        correlationId={error instanceof ApiError ? error.correlationId : undefined}
         onRetry={() => refetch()}
       />
     );

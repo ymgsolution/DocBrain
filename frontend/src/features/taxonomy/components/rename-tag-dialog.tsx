@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { useRenameTag } from "@/features/taxonomy/hooks";
 import { ApiError } from "@/lib/api-client";
+import { applyApiFieldErrors } from "@/lib/form-errors";
 import type { Tag } from "@/features/taxonomy/types";
 
 const renameSchema = z.object({
@@ -52,6 +53,7 @@ export function RenameTagDialog({ tag, onOpenChange }: RenameTagDialogProps) {
         onOpenChange(false);
       },
       onError: (error) => {
+        if (applyApiFieldErrors(form, error)) return;
         toast.error(error instanceof ApiError ? error.message : "Couldn't rename this tag, try again.");
       },
     });

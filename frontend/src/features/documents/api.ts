@@ -83,6 +83,11 @@ function xhrUpload<T>(url: string, formData: FormData, onProgress: (percent: num
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve(data as T);
       } else {
+        // Same 401 contract as apiClient's handleResponse — a session that
+        // expired while the upload dialog was open shouldn't dead-end here.
+        if (xhr.status === 401 && typeof window !== "undefined") {
+          window.location.href = `/login?next=${encodeURIComponent(window.location.pathname)}`;
+        }
         reject(new ApiError(xhr.status, data as ApiErrorBody));
       }
     };

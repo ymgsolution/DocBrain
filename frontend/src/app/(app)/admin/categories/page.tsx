@@ -83,6 +83,7 @@ export default function CategoriesAdminPage() {
       {isError ? (
         <ErrorState
           message={error instanceof ApiError ? error.message : "Couldn't load categories."}
+          correlationId={error instanceof ApiError ? error.correlationId : undefined}
           onRetry={() => refetch()}
         />
       ) : isLoading || !categories ? (

@@ -83,6 +83,7 @@ export default function DashboardPage() {
               <ErrorState
                 title="Couldn't load activity"
                 message={activity.error instanceof ApiError ? activity.error.message : undefined}
+                correlationId={activity.error instanceof ApiError ? activity.error.correlationId : undefined}
                 onRetry={() => activity.refetch()}
               />
             ) : activity.isLoading || !activity.data ? (
