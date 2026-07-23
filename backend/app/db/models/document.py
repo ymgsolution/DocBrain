@@ -70,6 +70,7 @@ class Document(Base):
 
     category: Mapped["Category"] = relationship()
     owner: Mapped["User"] = relationship(foreign_keys=[owner_id])
+    deleted_by_user: Mapped["User | None"] = relationship(foreign_keys=[deleted_by])
     current_version: Mapped["DocumentVersion | None"] = relationship(
         foreign_keys=[current_version_id], post_update=True
     )

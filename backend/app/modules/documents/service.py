@@ -139,6 +139,12 @@ class DocumentService:
     def list_documents(self, **kwargs) -> tuple[list[Document], int]:
         return self.repository.list_documents(**kwargs)
 
+    def list_trash(self, *, current_user: User, page: int, size: int) -> tuple[list[Document], int]:
+        # Same scoping as soft-delete/restore (§3.4): Admin sees every trashed
+        # document, everyone else sees only what they themselves deleted.
+        owner_id = None if current_user.role == UserRole.ADMIN else current_user.id
+        return self.repository.list_trash(owner_id=owner_id, page=page, size=size)
+
     def update_metadata(
         self,
         document_id: uuid.UUID,

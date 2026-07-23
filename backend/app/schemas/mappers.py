@@ -3,6 +3,7 @@ import uuid
 from app.db.models import Document, DocumentVersion
 from app.schemas.auth import UserSummary
 from app.schemas.document import CategorySummary, DocumentDetail, DocumentSummary, TagSummary
+from app.schemas.trash import TrashedDocumentItem
 from app.schemas.version import VersionDetail, VersionSummary
 
 
@@ -64,4 +65,16 @@ def to_document_detail(document: Document) -> DocumentDetail:
         last_reviewed_at=document.last_reviewed_at,
         last_accessed_at=document.last_accessed_at,
         status=document.status,
+    )
+
+
+def to_trashed_document_item(document: Document) -> TrashedDocumentItem:
+    assert document.deleted_at is not None  # invariant: only DELETED documents reach this mapper
+    return TrashedDocumentItem(
+        id=document.id,
+        title=document.title,
+        category=CategorySummary.model_validate(document.category),
+        owner=UserSummary.model_validate(document.owner),
+        deleted_at=document.deleted_at,
+        deleted_by=UserSummary.model_validate(document.deleted_by_user) if document.deleted_by_user else None,
     )

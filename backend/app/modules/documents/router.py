@@ -11,7 +11,8 @@ from app.db.session import get_db_session
 from app.modules.documents.repository import DocumentRepository
 from app.modules.documents.service import DocumentService
 from app.schemas.document import DocumentCreateMetadata, DocumentDetail, DocumentUpdate, PagedDocuments
-from app.schemas.mappers import to_document_detail, to_document_summary
+from app.schemas.mappers import to_document_detail, to_document_summary, to_trashed_document_item
+from app.schemas.trash import PagedTrash
 from app.storage.local_adapter import LocalFileSystemStorage
 
 router = APIRouter(prefix="/api/v1/documents", tags=["documents"])
@@ -82,6 +83,23 @@ def create_document(
         current_user=current_user,
     )
     return to_document_detail(document)
+
+
+@router.get("/trash", response_model=PagedTrash)
+def list_trash(
+    page: int = Query(default=0, ge=0),
+    size: int = Query(default=25, ge=1, le=100),
+    service: DocumentService = Depends(get_document_service),
+    current_user: User = Depends(get_current_user),
+) -> PagedTrash:
+    items, total = service.list_trash(current_user=current_user, page=page, size=size)
+    return PagedTrash(
+        items=[to_trashed_document_item(d) for d in items],
+        page=page,
+        size=size,
+        total=total,
+        total_pages=(total + size - 1) // size if size else 0,
+    )
 
 
 @router.get("/{document_id}", response_model=DocumentDetail)

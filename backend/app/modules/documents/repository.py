@@ -111,6 +111,29 @@ class DocumentRepository:
             tags.append(tag)
         return tags
 
+    def list_trash(self, *, owner_id: uuid.UUID | None, page: int, size: int) -> tuple[list[Document], int]:
+        stmt = (
+            select(Document)
+            .options(
+                selectinload(Document.category),
+                selectinload(Document.owner),
+                selectinload(Document.deleted_by_user),
+            )
+            .where(Document.status == DocumentStatus.DELETED)
+            .order_by(Document.deleted_at.desc())
+        )
+        if owner_id:
+            stmt = stmt.where(Document.owner_id == owner_id)
+
+        count_stmt = select(func.count()).select_from(
+            stmt.with_only_columns(Document.id).order_by(None).subquery()
+        )
+        total = self.db.scalar(count_stmt) or 0
+
+        stmt = stmt.offset(page * size).limit(size)
+        items = list(self.db.scalars(stmt))
+        return items, total
+
     def get_category(self, category_id: uuid.UUID) -> Category | None:
         return self.db.get(Category, category_id)
 
