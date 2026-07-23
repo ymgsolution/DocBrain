@@ -3,7 +3,7 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.db.models import Category, Document, DocumentTag, DocumentVersion, Tag
+from app.db.models import Category, Document, DocumentExtractedText, DocumentTag, DocumentVersion, Tag
 from app.db.models.enums import DocumentStatus
 
 
@@ -139,4 +139,15 @@ class DocumentRepository:
 
     def list_version_storage_paths(self, document_id: uuid.UUID) -> list[str]:
         stmt = select(DocumentVersion.storage_path).where(DocumentVersion.document_id == document_id)
+        return list(self.db.scalars(stmt))
+
+    def list_extracted_text_paths(self, document_id: uuid.UUID) -> list[str]:
+        """AI feature track — the `.txt` siblings live outside the DB cascade
+        (DocumentExtractedText rows cascade-delete for free; the files on
+        disk don't), so hard_delete needs these paths explicitly."""
+        stmt = (
+            select(DocumentExtractedText.extracted_text_path)
+            .join(DocumentVersion, DocumentVersion.id == DocumentExtractedText.document_version_id)
+            .where(DocumentVersion.document_id == document_id, DocumentExtractedText.extracted_text_path.is_not(None))
+        )
         return list(self.db.scalars(stmt))

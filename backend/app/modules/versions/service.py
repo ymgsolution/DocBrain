@@ -4,8 +4,8 @@ from typing import BinaryIO
 from fastapi import UploadFile
 
 from app.core.exceptions import GoneError, NotFoundError, PermissionDeniedError, ValidationError
-from app.db.models import ActivityEvent, Document, DocumentVersion, User
-from app.db.models.enums import ActivityEventType, DocumentStatus, UserRole
+from app.db.models import ActivityEvent, AiJob, Document, DocumentVersion, User
+from app.db.models.enums import ActivityEventType, AiJobType, DocumentStatus, UserRole
 from app.modules.versions.repository import VersionRepository
 from app.storage.checksum import sha256_of_stream
 from app.storage.local_adapter import LocalFileSystemStorage
@@ -89,6 +89,7 @@ class VersionService:
                     summary=f"{current_user.display_name} uploaded version {version_number} of “{document.title}”",
                 )
             )
+            self.repository.db.add(AiJob(job_type=AiJobType.EXTRACT, document_version_id=version.id))
 
             self.repository.db.commit()
         except Exception:
@@ -145,6 +146,12 @@ class VersionService:
                 ),
             )
         )
+        # A restore copies bytes from `source`, so its extraction is
+        # technically re-derivable rather than new content — enqueued anyway
+        # for uniformity (every new document_versions row gets exactly one
+        # EXTRACT job, no special-casing) rather than reusing `source`'s
+        # extraction result. Cheap to re-run; not an AI call.
+        self.repository.db.add(AiJob(job_type=AiJobType.EXTRACT, document_version_id=version.id))
         self.repository.db.commit()
         self.repository.db.refresh(version)
         return version

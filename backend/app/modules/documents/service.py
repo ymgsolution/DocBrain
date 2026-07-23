@@ -4,8 +4,8 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import UploadFile
 
 from app.core.exceptions import NotFoundError, PermissionDeniedError, ValidationError
-from app.db.models import ActivityEvent, Category, Document, DocumentVersion, User
-from app.db.models.enums import ActivityEventType, DocumentStatus, UserRole
+from app.db.models import ActivityEvent, AiJob, Category, Document, DocumentVersion, User
+from app.db.models.enums import ActivityEventType, AiJobType, DocumentStatus, UserRole
 from app.modules.documents.repository import DocumentRepository
 from app.storage.checksum import sha256_of_stream
 from app.storage.local_adapter import LocalFileSystemStorage
@@ -109,6 +109,10 @@ class DocumentService:
                     summary=f"{current_user.display_name} uploaded “{title}” (v1)",
                 )
             )
+            # AI feature track: queued here, processed out-of-band by the
+            # worker — never inline, so a slow/failing extraction can't
+            # affect this request's latency or success.
+            self.repository.db.add(AiJob(job_type=AiJobType.EXTRACT, document_version_id=version.id))
 
             self.repository.db.commit()
         except Exception:
@@ -241,6 +245,10 @@ class DocumentService:
             raise ValidationError("Only documents already in Trash can be permanently deleted.")
 
         storage_paths = self.repository.list_version_storage_paths(document.id)
+        # AI feature track: DocumentExtractedText/AiJob rows cascade-delete
+        # for free via FK ondelete, but the .txt files on disk don't — same
+        # reason storage_paths above needs collecting before the purge.
+        extracted_text_paths = self.repository.list_extracted_text_paths(document.id)
 
         document.current_version_id = None
         self.repository.db.commit()  # null the pointer before purge (§7.3)
@@ -249,4 +257,6 @@ class DocumentService:
         self.repository.db.commit()
 
         for path in storage_paths:
+            self.storage.delete(path)
+        for path in extracted_text_paths:
             self.storage.delete(path)
