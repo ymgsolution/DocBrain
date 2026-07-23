@@ -27,13 +27,25 @@ async function proxyToBackend(request: NextRequest, path: string[]): Promise<Nex
   }
 
   const backendResponse = await fetch(url, { method: request.method, headers, body });
-  const responseBody = await backendResponse.arrayBuffer();
+  // The Response constructor throws if given a body (even an empty
+  // ArrayBuffer) alongside a null-body status — 204/205/304 must pass null.
+  const isNullBodyStatus = [204, 205, 304].includes(backendResponse.status);
+  const responseBody = isNullBodyStatus ? null : await backendResponse.arrayBuffer();
+
+  const responseHeaders = new Headers({
+    "content-type": backendResponse.headers.get("content-type") ?? "application/json",
+  });
+  // File downloads (GET .../versions/{n}/content) rely on these — without
+  // them the browser loses the filename and falls back to sniffing content
+  // type instead of trusting the server.
+  const disposition = backendResponse.headers.get("content-disposition");
+  if (disposition) responseHeaders.set("content-disposition", disposition);
+  const nosniff = backendResponse.headers.get("x-content-type-options");
+  if (nosniff) responseHeaders.set("x-content-type-options", nosniff);
 
   return new NextResponse(responseBody, {
     status: backendResponse.status,
-    headers: {
-      "content-type": backendResponse.headers.get("content-type") ?? "application/json",
-    },
+    headers: responseHeaders,
   });
 }
 
