@@ -2,7 +2,7 @@
 
 > **This is the single source of truth for the project.** It must be updated whenever a feature is added, modified, refactored, removed, or completed. See [Important Rules](#important-rules) at the bottom.
 
-**Last updated:** 2026-07-23 (Phase 4.3 — Document Explorer)
+**Last updated:** 2026-07-23 (Phase 4.4 — Upload Document)
 
 ---
 
@@ -29,7 +29,7 @@ Full architecture rationale lives in [docs/DOCBRAIN-ARCHITECTURE.md](docs/DOCBRA
 - ✅ Backend Foundation
 - ✅ Backend APIs (all modules from §9.1 of the architecture doc are built and manually verified)
 - 🟨 Testing (extensive manual/curl verification done per-feature on the backend; browser-driven Playwright smoke test done for the shell; no automated `pytest`/component-test suite yet — that's Phase 6 in the roadmap)
-- 🟨 Frontend (Phase 4.1 — Application Shell — complete. Phase 4.2 — Dashboard — complete. Phase 4.3 — Document Explorer — complete: URL-driven filters (search/category/review-status/tags/sort), table + mobile list, pagination, wired-up topbar search, all working end-to-end in a real browser. Phases 4.4–4.9 — Upload, Details, Version History, Categories, Tags, Settings — not started)
+- 🟨 Frontend (Phase 4.1 — Application Shell — complete. Phase 4.2 — Dashboard — complete. Phase 4.3 — Document Explorer — complete. Phase 4.4 — Upload Document — complete: drag-and-drop upload modal with progress bar, creatable tag input, client-side validation, wired to the topbar's Upload button, all verified end-to-end in a real browser including a real file upload. Phases 4.5–4.9 — Document Details, Version History, Categories, Tags, Settings — not started)
 - ⬜ Deployment
 
 ---
@@ -182,20 +182,35 @@ Full architecture rationale lives in [docs/DOCBRAIN-ARCHITECTURE.md](docs/DOCBRA
   - Completed: 2026-07-23
   - Notes: Found and fixed a real Base UI gotcha via browser testing — `Select.Value` does **not** auto-derive its displayed label from the matching `SelectItem`'s children (unlike Radix's `SelectValue`); it just renders the raw value string unless given a `children` render-function (`{(value) => label}`). All three Explorer selects were initially showing raw values (`"all"`, `"updated_at"`) instead of their labels — fixed by adding label-lookup render functions. Documented as a new Base UI-vs-Radix decision (§9) since it'll bite again the moment `Select` is reused elsewhere. Verified end-to-end with headless-Chromium Playwright: table renders, search/category/review-status/tag/sort filters all correctly update the URL and results, pagination, row-click navigation, empty state for a nonsense query, and mobile view swapping the table for a stacked list — zero console errors except the expected 404 from clicking into `/documents/{id}` (Phase 4.5).
 
+### Frontend — Upload Document (Phase 4.4)
+
+- **Architecture correction before implementing** — re-checked the architecture doc's §6.3 before writing code, per the standing "explain before implementing" rule. My own earlier `PROJECT_STATUS.md` phrasing had called this a "two-step stepper"; §6.3 actually specifies a single unified modal (dropzone + file card + metadata form together), not a wizard. Built to the doc, not my own paraphrase.
+- **`UploadDropzone`** (new shared component) — drag-and-drop + click-to-browse, per the original design-system component list.
+- **`TagInput`** (documents feature) — chip input with autocomplete against existing tags *and* free-text creation (the backend's `tags: list[str]` accepts names and creates new ones on the fly via `get_or_create_tags`). Deliberately separate from the Explorer's `TagFilterCombobox`, which only filters by existing tags — different semantics (names vs. IDs, creatable vs. filter-only), so not the same component. Implemented as a plain controlled dropdown rather than `Popover`/`Command`, since those toggle open on trigger click, which would have fought with keeping the list open while typing.
+- **Upload dialog** (`UploadDocumentDialog`) — RHF + Zod for Title/Category/Description/Review-date, plus separately-managed `file` and `tags` state (not everything fits RHF's native-input model). Lazy-loaded via `next/dynamic({ ssr: false })` from the topbar's Upload button so the form/dropzone code isn't in every page's initial bundle. Submit button disabled until a file is selected and required fields are valid (§6.3's "disabled until valid").
+  - Completed: 2026-07-23
+- **Determinate upload progress** — `documentsApi.create()` uses `XMLHttpRequest` instead of `fetch`, specifically because `fetch` has no cross-browser way to observe upload progress; §6.3 requires a determinate progress bar with byte count. The BFF proxy needed no changes — it already forwards multipart bodies transparently.
+  - Completed: 2026-07-23
+- **Non-dismissible during upload** — the dialog's `onOpenChange` handler ignores every close attempt (Escape, outside click, close button, Cancel) while a mutation is pending; since Base UI funnels all of those through the same callback, one guard covers all of them without needing Radix-style `onInteractOutside`/`onEscapeKeyDown` props (which don't exist on Base UI's `Dialog.Popup`).
+  - Completed: 2026-07-23
+- **Client-side pre-validation** — extension allowlist and 25MB size limit mirrored from the backend's `core/config.py` defaults (`lib/upload-constants.ts`, documented decision, same pattern as `getReviewStatus()`) — instant "That file type isn't supported" / "File exceeds the size limit" feedback before a round trip; the backend remains the real authority.
+  - Completed: 2026-07-23
+- **Success/error feedback** — Sonner toast `"«Title» uploaded (v1)"` with a "View document" action (navigates to `/documents/{id}`), matching §6.3 exactly; error toasts map `ApiError` messages or fall back to "Upload failed — nothing was saved, retry?". On success, the documents-list and dashboard-summary query caches are invalidated so the Explorer/Dashboard reflect the new document without a manual refresh.
+  - Completed: 2026-07-23
+  - Notes: Verified end-to-end with headless-Chromium Playwright using a real uploaded file: empty-state submit-button-disabled check, file selection with auto-filled title, category select, tag creation (both an existing-tag suggestion and a brand-new tag), description, review date, progress bar, success toast, dialog auto-close, the new document appearing in both the Explorer and the Dashboard's Recent Activity feed immediately after (cache invalidation confirmed working, not just assumed), and a rejected `.exe` file correctly showing the unsupported-type error. Zero console errors. The test document and tag were deleted afterward via the API so the seed corpus stays at its documented baseline (53 documents). TypeScript, ESLint, and `next build` all clean.
+
 ---
 
 ## 4. Pending Features
 
 ### High Priority
 
-- Upload UI — the two-step stepper with drag-and-drop (S4), next up
-- Document Details UI — overview/versions/activity tabs (S5–S7)
+- Document Details UI — overview/versions/activity tabs (S5–S7), next up
 
 ### Medium Priority
 
 - Automated backend test suite (`pytest`) — unit tests for permission checks, version allocation, search ranking; one integration test covering the full upload→version→search→download loop (roadmap Phase 6)
 - Signed/short-lived-token URL for file download/preview links (browsers can't attach an `Authorization` header to a plain `<a href>`, so the BFF proxy's documented exception needs to be built)
-- Wire up the topbar's Upload button (currently present but intentionally disabled — functional once the Upload phase lands; the search box is already wired as of Phase 4.3)
 - Pending Reviews UI, Trash UI, Categories/Tags admin UI (S6–S9)
 - Settings screen (S10)
 
@@ -277,15 +292,16 @@ DocBrain/
     │   │   ├── shared/               # PageHeader, EmptyState, ErrorState, ReviewStatusBadge,
     │   │   │                        # FileTypeIcon, UserAvatar, ConfirmDialog, KpiCard,
     │   │   │                        # DocumentListItem, ActivityFeedItem, SearchBox,
-    │   │   │                        # PaginationBar
+    │   │   │                        # PaginationBar, UploadDropzone
     │   │   └── providers/           # QueryProvider, ThemeProvider
     │   ├── features/
     │   │   ├── auth/                # types.ts, api.ts, hooks.ts, components/login-form.tsx
     │   │   ├── taxonomy/            # types.ts, api.ts, hooks.ts (categories + tags, list-only —
     │   │   │                        #   full CRUD lands with the admin screens in 4.7/4.8)
-    │   │   ├── documents/           # types.ts, api.ts, hooks.ts,
+    │   │   ├── documents/           # types.ts, api.ts (list + create w/ XHR progress), hooks.ts,
     │   │   │                        # components/ (DocumentFilters, DocumentsTable,
-    │   │   │                        #   DocumentsMobileList, TagFilterCombobox)
+    │   │   │                        #   DocumentsMobileList, TagFilterCombobox, TagInput,
+    │   │   │                        #   UploadDocumentDialog — lazy-loaded from the topbar)
     │   │   └── dashboard/           # types.ts, api.ts, hooks.ts,
     │   │                            # components/ (KpiSection, CategoryDistribution,
     │   │                            #   DocumentListCard, ActivityFeed, PendingReviewsBanner,
@@ -294,14 +310,16 @@ DocBrain/
     │   ├── lib/
     │   │   ├── api-client.ts        # typed fetch wrapper + ApiError, targets /api/bff
     │   │   ├── constants.ts         # TOKEN_COOKIE, API_BASE_URL
-    │   │   ├── format.ts            # getInitials(), formatRelativeTime(), getReviewStatus()
+    │   │   ├── format.ts            # getInitials(), formatRelativeTime(), getReviewStatus(),
+    │   │   │                        # formatFileSize()
+    │   │   ├── upload-constants.ts  # extension allowlist + size limit, mirrors backend config
     │   │   └── utils.ts             # cn()
     │   ├── hooks/                   # empty — cross-feature hooks land here as needed
     │   └── types/
     │       ├── api.ts               # UserRole, ApiErrorBody, PagedResponse<T>
     │       └── document.ts          # ReviewStatus, CategorySummary, TagSummary,
-    │                                 # VersionSummary, DocumentSummary — shared across
-    │                                 # dashboard/Explorer/Details, not duplicated per-feature
+    │                                 # VersionSummary, DocumentSummary, DocumentDetail —
+    │                                 # shared across dashboard/Explorer/Upload/Details
     └── public/
 ```
 
@@ -390,14 +408,14 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 | Layout / app shell | ✅ Done — sidebar, topbar, breadcrumb, user menu, theme toggle, responsive mobile drawer |
 | Login | ✅ Done — persona picker (live data) + email form, RHF + Zod |
 | Dashboard | ✅ Done — KPIs, category distribution, recently-added/accessed, expiring-soon, role-gated pending-reviews banner, activity feed, all live-data |
-| Upload | ⬜ Not started (topbar button present but disabled) |
+| Upload | ✅ Done — drag-and-drop dropzone, creatable tag input, RHF+Zod metadata form, determinate progress bar (XHR), non-dismissible mid-upload, client-side pre-validation, topbar button wired |
 | Explorer | ✅ Done — URL-driven filters (search/category/review-status/tags/sort), table + mobile list, pagination, empty/error/loading states, topbar search wired up |
-| Document Details | ⬜ Not started (dashboard/Explorer rows already link to `/documents/{id}`, which 404s until Phase 4.5 — same forward-dependency pattern as the disabled topbar Upload button) |
+| Document Details | ⬜ Not started (dashboard/Explorer rows already link to `/documents/{id}`, which 404s until Phase 4.5 — same forward-dependency pattern already documented) |
 | Version History | ⬜ Not started |
 | Search | ✅ Done — full-text search via the Explorer's search box (in-page, debounced) and the topbar's global search box (submit-triggered, from anywhere in the app) |
-| Responsive Design | ✅ Verified for the shell, Dashboard, and now the Explorer (mobile/tablet/desktop screenshots, no horizontal scroll; the Explorer's table becomes a stacked list below `lg` instead of scrolling horizontally) |
+| Responsive Design | ✅ Verified for the shell, Dashboard, Explorer, and now the Upload dialog (scrolls internally on short viewports rather than overflowing) |
 
-**What exists:** Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + shadcn/ui (Base UI primitives) + TanStack Query + React Hook Form + Zod + next-themes, fully wired: design tokens, API layer, BFF proxy, auth guard, login, app shell, a live Dashboard, and a live Document Explorer all working end-to-end — verified with headless-Chromium Playwright scripts (shell: 10-step flow; dashboard: full-content check across Admin/Employee personas, dark mode, tablet, mobile; Explorer: filters, pagination, row navigation, empty state, mobile layout), not just code review. Production build (`next build`) succeeds cleanly; TypeScript and ESLint are both clean.
+**What exists:** Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind v4 + shadcn/ui (Base UI primitives) + TanStack Query + React Hook Form + Zod + next-themes, fully wired: design tokens, API layer, BFF proxy, auth guard, login, app shell, a live Dashboard, a live Document Explorer, and a live Upload flow all working end-to-end — verified with headless-Chromium Playwright scripts (shell: 10-step flow; dashboard: full-content check across Admin/Employee personas, dark mode, tablet, mobile; Explorer: filters, pagination, row navigation, empty state, mobile layout; Upload: a real file upload through the full form, progress bar, success toast, cache invalidation confirmed via the Dashboard's activity feed, and a rejected invalid file type), not just code review. Production build (`next build`) succeeds cleanly; TypeScript and ESLint are both clean.
 
 ---
 
@@ -430,6 +448,10 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 - **2026-07-23** — Base UI's `Select.Value` does not auto-derive its label from the matching `SelectItem`'s children the way Radix's `SelectValue` does — it renders the raw `value` unless given a `children` render-function. A second Base UI-vs-Radix gotcha (after the `DropdownMenuGroup` one in Phase 4.1) — anything reaching for `Select` should expect to pass an explicit label lookup.
 - **2026-07-23** — Tag filtering fetches the full tag vocabulary once (`limit: 100`) and filters client-side via cmdk's built-in matching, rather than a debounced per-keystroke server search — the vocabulary is a few dozen entries (not thousands), so a server round-trip per keystroke would be over-engineering for the current scale. Revisit if the tag count grows substantially.
 - **2026-07-23** — The topbar's global search box is submit-triggered (Enter navigates to `/documents?q=…`), while the Explorer's own in-page search box is debounce-live — deliberately different UX for a cross-page entry point vs. in-page filtering, not an inconsistency.
+- **2026-07-23** — Upload built as a single unified modal (dropzone + file card + metadata form together) per architecture doc §6.3, correcting an earlier `PROJECT_STATUS.md` mischaracterization of it as a "two-step stepper." Re-checked the doc before implementing, per the standing rule — the doc is authoritative over any of my own prior paraphrasing.
+- **2026-07-23** — Document upload (`documentsApi.create`) uses `XMLHttpRequest` instead of `fetch` — `fetch` has no cross-browser API for observing upload progress, and the architecture doc requires a determinate progress bar with byte count. The BFF proxy needed zero changes since it already forwards multipart bodies transparently.
+- **2026-07-23** — `TagInput` (Upload's creatable tag field) is a separate component from the Explorer's `TagFilterCombobox`, not a shared one — they operate on different data (tag names vs. tag IDs) and different semantics (create-on-the-fly vs. filter-existing-only). Built as a plain controlled dropdown rather than `Popover`/`Command`, since those toggle open on trigger click, which conflicts with keeping a list open while the user types.
+- **2026-07-23** — Client-side upload validation (extension allowlist, 25MB size cap) mirrors the backend's `core/config.py` defaults in `lib/upload-constants.ts` — same "instant feedback, backend remains the real authority" pattern already established for `getReviewStatus()`.
 
 ---
 
@@ -446,12 +468,14 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 - ~~Base UI console warning on Dashboard: `Button` rendered as a `Link` ("View all" / "Review now") expected a native `<button>`~~ — needed `nativeButton={false}` when polymorphically rendering as an `<a>`. Found via browser testing, fixed 2026-07-23.
 - ~~Dashboard's `/documents?categoryId=…` and `/documents?reviewStatus=…` links 404'd because the Explorer didn't exist yet~~ — resolved by building the Explorer (Phase 4.3); those links now work exactly as designed.
 - ~~Explorer's Category/Review Status/Sort selects displayed raw values (`"all"`, `"updated_at"`) instead of labels~~ — Base UI's `Select.Value` needed an explicit label-lookup render function (see Known Issues → Resolved and §9). Found via browser testing, fixed 2026-07-23.
+- ~~Topbar's Upload button was a disabled placeholder~~ — resolved by building the Upload flow (Phase 4.4); it now opens a working upload dialog from anywhere in the app.
 
 ### Open
 
 - **No automated test suite.** All backend verification so far has been manual (curl + direct DB queries); the frontend has ad hoc Playwright smoke scripts (not checked into the repo — live in the session scratchpad) rather than a real test suite. Thorough, but not regression-proof. Formal `pytest`/component-test suites are Phase 6 in the roadmap, not yet started.
 - **Dashboard's "Recently Accessed" widget shows `updatedAt`, not a true "last accessed" timestamp.** `GET /dashboard/summary` returns `DocumentSummary` objects, which don't include `lastAccessedAt` (only `DocumentDetail` does, via the document-detail endpoint). Not worth a backend schema change for one dashboard widget's label right now — revisit if it's noticeably confusing in practice.
-- **Document row/card links point at `/documents/{id}`, which doesn't exist yet.** Intentional forward-dependency (Details is Phase 4.5) — clicking a document from the Dashboard or Explorer 404s until that phase lands, same accepted pattern as the topbar's disabled Upload button.
+- **Document row/card links point at `/documents/{id}`, which doesn't exist yet.** Intentional forward-dependency (Details is Phase 4.5) — clicking a document from the Dashboard, Explorer, or the Upload success toast's "View document" action 404s until that phase lands.
+- **Upload progress reflects the browser→Next.js leg only, not Next.js→FastAPI.** The BFF proxy buffers the full response before returning it, so true end-to-end progress isn't observable from the client — acceptable on localhost where that second leg is fast; worth revisiting if the backend is ever deployed somewhere with meaningfully higher latency between the two.
 - **Browser can't directly download files via a plain link.** `GET /versions/{n}/content` requires a Bearer token; a plain `<a href>` in a browser won't attach one. The architecture doc already flags this as the one deliberate exception to the BFF-proxies-everything pattern (§10.2) — needs a signed/short-lived-token URL or signed cookie once the frontend is built. Not a bug, but not yet solved either.
 - **Search doesn't cover document body text.** `search_vector` indexes title, description, tags, category name, and current filename — not the actual PDF/DOCX content (FR-22, deferred).
 - **No duplicate-upload detection.** SHA-256 checksums are computed and stored per version, but nothing checks "does this content already exist?" and warns the user (FR-21, deferred).
@@ -460,8 +484,7 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 
 ## 11. Next Immediate Tasks
 
-1. Build the Upload flow (S4, Phase 4.4), consuming `POST /documents` (multipart) — unblocks the topbar's Upload button. Category picker and tag input can reuse `taxonomyApi`/`TagFilterCombobox`-adjacent patterns from the Explorer.
-2. Build Document Details + Version History (S5–S6, Phases 4.5–4.6) — makes the Dashboard's and Explorer's `/documents/{id}` links resolve instead of 404ing.
+1. Build Document Details + Version History (S5–S6, Phases 4.5–4.6), next up — makes the Dashboard's, Explorer's, and Upload success toast's `/documents/{id}` links resolve instead of 404ing. The metadata edit-mode side panel can reuse `TagInput` from Upload.
 
 ---
 
@@ -490,6 +513,7 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 
 ### 2026-07-23
 
+- Completed **Phase 4.4 (Upload Document)** — a single unified upload modal per architecture doc §6.3 (correcting my own earlier "two-step stepper" mischaracterization), built from a new `UploadDropzone` (shared) and `TagInput` (creatable, distinct from the Explorer's filter-only `TagFilterCombobox`). `documentsApi.create()` uses `XMLHttpRequest` for a real determinate progress bar (`fetch` can't observe upload progress). Non-dismissible mid-upload via a single `onOpenChange` guard that covers Escape/outside-click/close-button/Cancel uniformly. Client-side extension/size pre-validation mirrors the backend's `core/config.py` defaults. Topbar's Upload button is now fully wired (both topbar buttons — search and upload — are live as of this phase). Verified end-to-end with headless-Chromium Playwright using a real file upload: validation-disabled submit button, auto-filled title, category selection, tag creation (existing + brand-new), progress bar, success toast, dialog auto-close, the new document appearing in the Explorer and the Dashboard's activity feed (cache invalidation confirmed, not assumed), and a rejected unsupported file type — zero console errors. Test artifacts deleted afterward via the API so the seed corpus stays at its documented 53-document baseline. TypeScript, ESLint, and `next build` all clean.
 - Completed **Phase 4.3 (Document Explorer)** — `documentsApi` + `taxonomyApi` feature modules, URL-driven filter state (search/category/review-status/tags/sort/page — the same query params the Dashboard already links to), a debounced `SearchBox` and `PaginationBar` (new shared components), a `TagFilterCombobox`, a desktop `DocumentsTable` collapsing to a mobile stacked list below `lg`, and the topbar's search box wired up for real. Verified end-to-end with headless-Chromium Playwright: filters, pagination, row navigation, empty state for a nonsense query, and mobile layout — zero console errors except the expected 404 from clicking into `/documents/{id}` (Phase 4.5, not yet built). Found and fixed one real Base UI gotcha along the way — `Select.Value` needs an explicit label-lookup render function; it doesn't auto-derive labels from `SelectItem` children like Radix does. TypeScript, ESLint, and `next build` all clean.
 - Completed **Phase 4.2 (Dashboard)** — `dashboardApi` feature module, KPI section, role-gated Pending Reviews banner, Documents by Category bar chart, Recently Added / Recently Accessed / Expiring Soon (one generic `DocumentListCard`, not three duplicates), and a Recent Activity feed, all consuming the live `GET /dashboard/summary` and `GET /dashboard/activity` endpoints. New shared types (`src/types/document.ts`) and shared components (`KpiCard`, `DocumentListItem`, `ActivityFeedItem`) built for reuse by the Explorer and Document Details phases. Verified end-to-end with headless-Chromium Playwright scripts across an Admin persona (all widgets + banner visible) and an Employee persona (banner and admin-only nav correctly hidden), plus dark mode, tablet, and mobile viewports — zero console errors after fixing one real Base UI warning (`nativeButton={false}` needed when rendering `Button` as a `Link`). TypeScript, ESLint, and `next build` all clean.
 - Completed **Phase 4.1 (Application Shell)** — design tokens (from-scratch enterprise palette + a fixed font-loading bug), API layer foundation, BFF proxy, auth guard, login page, reusable component library, and the full sidebar/topbar shell. Verified end-to-end with a real headless-Chromium Playwright script (10-step flow, screenshots, console-error check) — not just code review. Found and fixed one real bug along the way (`DropdownMenuLabel` needing a `DropdownMenuGroup` wrapper under Base UI). TypeScript, ESLint, and `next build` all clean.
