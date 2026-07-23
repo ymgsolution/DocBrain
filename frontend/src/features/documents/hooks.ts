@@ -3,10 +3,14 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { documentsApi } from "./api";
-import type { DocumentCreatePayload, DocumentListFilters } from "./types";
+import { dashboardApi } from "@/features/dashboard/api";
+import type { DocumentCreatePayload, DocumentListFilters, DocumentUpdatePayload } from "./types";
 
 export const documentsKeys = {
   list: (filters: DocumentListFilters) => ["documents", "list", filters] as const,
+  detail: (id: string) => ["documents", "detail", id] as const,
+  versions: (id: string) => ["documents", "versions", id] as const,
+  activity: (id: string) => ["documents", "activity", id] as const,
 };
 
 export function useDocuments(filters: DocumentListFilters) {
@@ -33,4 +37,63 @@ export function useCreateDocument() {
   });
 
   return { ...mutation, progress };
+}
+
+export function useDocument(id: string) {
+  return useQuery({
+    queryKey: documentsKeys.detail(id),
+    queryFn: () => documentsApi.get(id),
+  });
+}
+
+export function useDocumentVersions(id: string) {
+  return useQuery({
+    queryKey: documentsKeys.versions(id),
+    queryFn: () => documentsApi.listVersions(id),
+  });
+}
+
+export function useDocumentActivity(id: string) {
+  return useQuery({
+    queryKey: documentsKeys.activity(id),
+    queryFn: () => dashboardApi.getActivity({ documentId: id, size: 50 }),
+  });
+}
+
+function invalidateAfterDocumentChange(queryClient: ReturnType<typeof useQueryClient>, id: string) {
+  queryClient.invalidateQueries({ queryKey: documentsKeys.detail(id) });
+  queryClient.invalidateQueries({ queryKey: ["documents", "list"] });
+  queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+}
+
+export function useUpdateDocument(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: DocumentUpdatePayload) => documentsApi.update(id, payload),
+    onSuccess: () => invalidateAfterDocumentChange(queryClient, id),
+  });
+}
+
+export function useMarkReviewed(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (note: string | undefined) => documentsApi.markReviewed(id, note),
+    onSuccess: () => invalidateAfterDocumentChange(queryClient, id),
+  });
+}
+
+export function useSoftDeleteDocument(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => documentsApi.softDelete(id),
+    onSuccess: () => invalidateAfterDocumentChange(queryClient, id),
+  });
+}
+
+export function useRestoreDocument(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => documentsApi.restore(id),
+    onSuccess: () => invalidateAfterDocumentChange(queryClient, id),
+  });
 }

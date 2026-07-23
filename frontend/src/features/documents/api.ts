@@ -1,11 +1,35 @@
 import { apiClient, ApiError, BFF_BASE } from "@/lib/api-client";
 import type { ApiErrorBody } from "@/types/api";
-import type { DocumentDetail } from "@/types/document";
-import type { DocumentCreatePayload, DocumentListFilters, PagedDocuments } from "./types";
+import type { DocumentDetail, VersionDetail } from "@/types/document";
+import type { DocumentCreatePayload, DocumentListFilters, DocumentUpdatePayload, PagedDocuments } from "./types";
 
 export const documentsApi = {
   list(filters: DocumentListFilters): Promise<PagedDocuments> {
     return apiClient.get<PagedDocuments>("/documents", { ...filters });
+  },
+
+  get(id: string): Promise<DocumentDetail> {
+    return apiClient.get<DocumentDetail>(`/documents/${id}`);
+  },
+
+  update(id: string, payload: DocumentUpdatePayload): Promise<DocumentDetail> {
+    return apiClient.patch<DocumentDetail>(`/documents/${id}`, payload);
+  },
+
+  softDelete(id: string): Promise<void> {
+    return apiClient.delete<void>(`/documents/${id}`);
+  },
+
+  restore(id: string): Promise<DocumentDetail> {
+    return apiClient.post<DocumentDetail>(`/documents/${id}/restore`);
+  },
+
+  markReviewed(id: string, note?: string): Promise<DocumentDetail> {
+    return apiClient.post<DocumentDetail>(`/documents/${id}/reviews`, { note });
+  },
+
+  listVersions(id: string): Promise<VersionDetail[]> {
+    return apiClient.get<VersionDetail[]>(`/documents/${id}/versions`);
   },
 
   // XMLHttpRequest instead of fetch — fetch has no cross-browser way to

@@ -18,6 +18,20 @@ export class ApiError extends Error {
 
 export const BFF_BASE = "/api/bff";
 
+// A plain <a>/<iframe> to this URL authenticates for free: it's a
+// same-origin request, so the browser sends the httpOnly session cookie
+// automatically, and the BFF proxy (route.ts) turns that into the Bearer
+// header FastAPI needs before streaming the file back — no signed URL
+// scheme required (see PROJECT_STATUS.md §10 for why an earlier note here
+// assumed otherwise).
+export function getVersionContentUrl(
+  documentId: string,
+  versionNumber: number,
+  disposition: "inline" | "attachment" = "attachment",
+): string {
+  return `${BFF_BASE}/documents/${documentId}/versions/${versionNumber}/content?disposition=${disposition}`;
+}
+
 async function handleResponse<T>(response: Response): Promise<T> {
   if (response.status === 204) return undefined as T;
 

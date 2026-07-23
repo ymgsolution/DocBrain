@@ -29,3 +29,12 @@ export interface DocumentCreatePayload {
   tags: string[];
   reviewDueDate?: string;
 }
+
+export interface DocumentUpdatePayload {
+  title?: string;
+  description?: string;
+  categoryId?: string;
+  tags?: string[];
+  reviewDueDate?: string | null;
+  ownerId?: string;
+}

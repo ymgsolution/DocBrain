@@ -41,3 +41,17 @@ export interface DocumentDetail extends DocumentSummary {
   lastAccessedAt: string | null;
   status: "ACTIVE" | "DELETED";
 }
+
+export interface VersionDetail {
+  id: string;
+  versionNumber: number;
+  isCurrent: boolean;
+  originalFilename: string;
+  mimeType: string;
+  sizeBytes: number;
+  checksumSha256: string;
+  changeNote: string | null;
+  uploadedBy: UserSummary;
+  uploadedAt: string;
+  restoredFromVersionId: string | null;
+}

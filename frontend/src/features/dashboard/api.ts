@@ -6,7 +6,7 @@ export const dashboardApi = {
     return apiClient.get<DashboardSummary>("/dashboard/summary");
   },
 
-  getActivity(params?: { page?: number; size?: number }): Promise<PagedActivity> {
+  getActivity(params?: { page?: number; size?: number; documentId?: string }): Promise<PagedActivity> {
     return apiClient.get<PagedActivity>("/dashboard/activity", params);
   },
 };
