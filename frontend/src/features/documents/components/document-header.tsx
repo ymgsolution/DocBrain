@@ -1,4 +1,5 @@
-import { ClipboardCheck, FilePlus2, Pencil, Trash2 } from "lucide-react";
+import { ClipboardCheck, FilePlus2, Loader2, Pencil, Trash2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FileTypeIcon } from "@/components/shared/file-type-icon";
 import { ReviewStatusBadge } from "@/components/shared/status-badge";
@@ -45,6 +46,16 @@ export function DocumentHeader({
               </span>
             )}
             <ReviewStatusBadge status={getReviewStatus(document.reviewDueDate)} />
+            {/* AI feature track — quiet, self-clearing; no error state shown
+                for FAILED/UNSUPPORTED, matching the app's graceful-degradation
+                pattern for background AI work (nothing to act on, so nothing
+                shown). */}
+            {(document.extractionStatus === null || document.extractionStatus === "PENDING") && (
+              <Badge variant="outline" className="gap-1 font-normal">
+                <Loader2 className="size-3 animate-spin" />
+                Analyzing document…
+              </Badge>
+            )}
           </div>
           {document.description && <p className="text-muted-foreground mt-1 text-sm">{document.description}</p>}
         </div>

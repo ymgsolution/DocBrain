@@ -45,4 +45,4 @@ class DocumentExtractedText(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     extracted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    document_version: Mapped["DocumentVersion"] = relationship()
+    document_version: Mapped["DocumentVersion"] = relationship(back_populates="extracted_text")

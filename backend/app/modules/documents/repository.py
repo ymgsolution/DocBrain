@@ -19,12 +19,22 @@ class DocumentRepository:
             selectinload(Document.tags),
         )
 
+    def _detail_query(self):
+        # Only the single-document fetch needs extraction status (for the
+        # Document Details "Analyzing…" badge) — added on top of
+        # _base_query() rather than into it, so the paginated list endpoint
+        # (DocumentSummary, which never serializes this) doesn't pay for an
+        # eager-load it never uses.
+        return self._base_query().options(
+            selectinload(Document.current_version).selectinload(DocumentVersion.extracted_text)
+        )
+
     def get_active_by_id(self, document_id: uuid.UUID) -> Document | None:
-        stmt = self._base_query().where(Document.id == document_id, Document.status == DocumentStatus.ACTIVE)
+        stmt = self._detail_query().where(Document.id == document_id, Document.status == DocumentStatus.ACTIVE)
         return self.db.scalar(stmt)
 
     def get_any_by_id(self, document_id: uuid.UUID) -> Document | None:
-        stmt = self._base_query().where(Document.id == document_id)
+        stmt = self._detail_query().where(Document.id == document_id)
         return self.db.scalar(stmt)
 
     def list_documents(

@@ -3,7 +3,7 @@ from datetime import date, datetime
 
 from pydantic import Field
 
-from app.db.models.enums import DocumentStatus
+from app.db.models.enums import DocumentStatus, ExtractionStatus
 from app.schemas.auth import UserSummary
 from app.schemas.base import CamelModel
 from app.schemas.version import VersionSummary
@@ -38,6 +38,10 @@ class DocumentDetail(DocumentSummary):
     last_reviewed_at: datetime | None
     last_accessed_at: datetime | None
     status: DocumentStatus
+    # AI feature track — null means no document_extracted_text row exists yet
+    # (the AiJob hasn't been claimed by the worker), which the frontend
+    # treats identically to PENDING: still show the "Analyzing…" badge.
+    extraction_status: ExtractionStatus | None = None
 
 
 class DocumentCreateMetadata(CamelModel):

@@ -65,6 +65,11 @@ def to_document_detail(document: Document) -> DocumentDetail:
         last_reviewed_at=document.last_reviewed_at,
         last_accessed_at=document.last_accessed_at,
         status=document.status,
+        extraction_status=(
+            document.current_version.extracted_text.status
+            if document.current_version and document.current_version.extracted_text
+            else None
+        ),
     )
 
 

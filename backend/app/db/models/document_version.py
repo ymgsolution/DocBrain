@@ -10,6 +10,7 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.db.models.document import Document
+    from app.db.models.document_extracted_text import DocumentExtractedText
     from app.db.models.user import User
 
 
@@ -46,6 +47,21 @@ class DocumentVersion(Base):
 
     document: Mapped["Document"] = relationship(back_populates="versions", foreign_keys=[document_id])
     uploader: Mapped["User"] = relationship(foreign_keys=[uploaded_by])
+    # AI feature track — the extraction-status badge on Document Details
+    # reads this via current_version.extracted_text, eager-loaded alongside
+    # it rather than a separate query.
+    #
+    # passive_deletes=True: without it, hard-deleting a document whose
+    # current_version.extracted_text was eager-loaded (get_detail's
+    # _detail_query()) makes the ORM try to UPDATE document_extracted_text
+    # SET document_version_id=NULL when this version is deleted — a 500,
+    # since that column is NOT NULL. The DB's own ON DELETE CASCADE (on
+    # DocumentExtractedText.document_version_id) already handles this
+    # correctly; passive_deletes tells SQLAlchemy to trust it and not try to
+    # null the FK itself.
+    extracted_text: Mapped["DocumentExtractedText | None"] = relationship(
+        back_populates="document_version", uselist=False, passive_deletes=True
+    )
 
     __table_args__ = (
         UniqueConstraint("document_id", "version_number", name="uq_document_versions_document_id_version_number"),

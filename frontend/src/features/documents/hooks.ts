@@ -43,6 +43,13 @@ export function useDocument(id: string) {
   return useQuery({
     queryKey: documentsKeys.detail(id),
     queryFn: () => documentsApi.get(id),
+    // AI feature track — poll while extraction hasn't finished yet (null or
+    // PENDING) so the "Analyzing…" badge clears on its own; stop polling the
+    // instant it lands on a terminal status.
+    refetchInterval: (query) => {
+      const status = query.state.data?.extractionStatus;
+      return status === null || status === "PENDING" ? 2000 : false;
+    },
   });
 }
 
