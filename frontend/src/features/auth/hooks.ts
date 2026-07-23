@@ -3,11 +3,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { authApi } from "./api";
-import type { LoginRequest } from "./types";
+import type { LoginRequest, UserPreferencesUpdate } from "./types";
 
 export const authKeys = {
   me: ["auth", "me"] as const,
   personas: ["auth", "personas"] as const,
+  preferences: ["auth", "preferences"] as const,
 };
 
 export function useCurrentUser() {
@@ -49,6 +50,23 @@ export function useLogout() {
       queryClient.clear();
       router.push("/login");
       router.refresh();
+    },
+  });
+}
+
+export function usePreferences() {
+  return useQuery({
+    queryKey: authKeys.preferences,
+    queryFn: authApi.getPreferences,
+  });
+}
+
+export function useUpdatePreferences() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: UserPreferencesUpdate) => authApi.updatePreferences(payload),
+    onSuccess: (data) => {
+      queryClient.setQueryData(authKeys.preferences, data);
     },
   });
 }

@@ -1,6 +1,6 @@
 import { ApiError, apiClient } from "@/lib/api-client";
 import type { ApiErrorBody } from "@/types/api";
-import type { LoginRequest, UserSummary } from "./types";
+import type { LoginRequest, UserPreferences, UserPreferencesUpdate, UserSummary } from "./types";
 
 export const authApi = {
   // Login is special-cased (not routed through /api/bff) because the BFF
@@ -29,5 +29,13 @@ export const authApi = {
 
   listPersonas(): Promise<UserSummary[]> {
     return apiClient.get<UserSummary[]>("/auth/users");
+  },
+
+  getPreferences(): Promise<UserPreferences> {
+    return apiClient.get<UserPreferences>("/auth/me/preferences");
+  },
+
+  updatePreferences(payload: UserPreferencesUpdate): Promise<UserPreferences> {
+    return apiClient.patch<UserPreferences>("/auth/me/preferences", payload);
   },
 };

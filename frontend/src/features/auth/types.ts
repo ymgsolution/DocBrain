@@ -10,3 +10,15 @@ export interface UserSummary {
 export interface LoginRequest {
   email: string;
 }
+
+export type ThemePreference = "light" | "dark" | "system";
+
+export interface UserPreferences {
+  theme: ThemePreference;
+  defaultPageSize: number;
+}
+
+export interface UserPreferencesUpdate {
+  theme?: ThemePreference;
+  defaultPageSize?: number;
+}
