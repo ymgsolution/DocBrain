@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# uv
+.venv/
+
+# env files
+.env*
+!.env.example
+
+# local file storage — keep the tree, ignore uploaded content.
+# Directories must be un-ignored explicitly too, or the nested .gitkeep
+# negations below are silently skipped (git won't recurse into an
+# already-excluded directory just because a file inside it is negated).
+uploads/**
+!uploads/.gitkeep
+!uploads/tmp/
+!uploads/tmp/.gitkeep
+!uploads/documents/
+!uploads/documents/.gitkeep
+
+.DS_Store
