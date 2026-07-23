@@ -2,17 +2,25 @@
 
 import { Menu, Plus, Search } from "lucide-react";
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SidebarContent } from "./sidebar";
 import { ThemeToggle } from "./theme-toggle";
 import { UserMenu } from "./user-menu";
 
+// Lazy-loaded: the upload form/dropzone code only needs to reach the
+// browser once someone actually opens it, not on every page load.
+const UploadDocumentDialog = dynamic(
+  () => import("@/features/documents/components/upload-document-dialog").then((m) => m.UploadDocumentDialog),
+  { ssr: false },
+);
+
 export function Topbar() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
   const [query, setQuery] = useState("");
   const router = useRouter();
 
@@ -51,20 +59,15 @@ export function Topbar() {
       </form>
 
       <div className="flex flex-1 items-center justify-end gap-2">
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button size="sm" className="gap-1.5" disabled>
-                <Plus className="size-4" />
-                Upload
-              </Button>
-            }
-          />
-          <TooltipContent>Coming in the Upload phase</TooltipContent>
-        </Tooltip>
+        <Button size="sm" className="gap-1.5" onClick={() => setUploadOpen(true)}>
+          <Plus className="size-4" />
+          Upload
+        </Button>
         <ThemeToggle />
         <UserMenu />
       </div>
+
+      {uploadOpen && <UploadDocumentDialog open={uploadOpen} onOpenChange={setUploadOpen} />}
     </header>
   );
 }
