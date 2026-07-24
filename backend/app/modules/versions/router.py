@@ -1,4 +1,5 @@
 import uuid
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from fastapi.responses import StreamingResponse
@@ -32,6 +33,18 @@ def _resolve_disposition(requested: str, mime_type: str) -> str:
     if requested == "inline" and (mime_type in INLINE_PREVIEWABLE_MIME_TYPES or mime_type.startswith("image/")):
         return "inline"
     return "attachment"
+
+
+def _content_disposition_header(disposition: str, filename: str) -> str:
+    # HTTP header values must be Latin-1; `original_filename` is preserved
+    # exactly as uploaded (§12.2) and can contain characters outside that
+    # range (em dashes, curly quotes, non-English text). RFC 6266's
+    # filename*= form carries the real UTF-8 name for modern clients; the
+    # plain filename= stays a pure-ASCII fallback for anything that doesn't
+    # understand filename*=, rather than raising or silently mangling it.
+    ascii_fallback = filename.encode("ascii", errors="replace").decode("ascii")
+    encoded = quote(filename, safe="")
+    return f'{disposition}; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded}'
 
 
 @router.get("", response_model=list[VersionDetail])
@@ -73,7 +86,7 @@ def download_version(
     version, stream = version_service.get_content(document, version_number)
     disp = _resolve_disposition(disposition, version.mime_type)
     headers = {
-        "Content-Disposition": f'{disp}; filename="{version.original_filename}"',
+        "Content-Disposition": _content_disposition_header(disp, version.original_filename),
         "X-Content-Type-Options": "nosniff",
     }
     return StreamingResponse(stream, media_type=version.mime_type, headers=headers)
