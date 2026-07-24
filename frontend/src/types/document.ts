@@ -40,12 +40,21 @@ export interface DocumentSummary {
 // PENDING: still show the "Analyzing…" indicator.
 export type ExtractionStatus = "PENDING" | "SUCCEEDED" | "FAILED" | "UNSUPPORTED" | null;
 
+// AI feature track (Phase 2) — null whenever there's nothing to show yet (no
+// job run, still pending, or it failed); the UI simply omits the card.
+export interface AiSuggestion {
+  title: string | null;
+  summary: string | null;
+  tags: string[];
+}
+
 export interface DocumentDetail extends DocumentSummary {
   tags: TagSummary[];
   lastReviewedAt: string | null;
   lastAccessedAt: string | null;
   status: "ACTIVE" | "DELETED";
   extractionStatus: ExtractionStatus;
+  aiSuggestion: AiSuggestion | null;
 }
 
 export interface VersionDetail {

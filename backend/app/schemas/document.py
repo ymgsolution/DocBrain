@@ -33,6 +33,16 @@ class DocumentSummary(CamelModel):
     created_at: datetime
 
 
+class AiSuggestion(CamelModel):
+    """Shadow-mode metadata suggestion, only surfaced once SUCCEEDED — a
+    PENDING/FAILED/SKIPPED analysis row (or none at all) simply means no
+    suggestion, not an error."""
+
+    title: str | None = None
+    summary: str | None = None
+    tags: list[str] = Field(default_factory=list)
+
+
 class DocumentDetail(DocumentSummary):
     tags: list[TagSummary]
     last_reviewed_at: datetime | None
@@ -42,6 +52,9 @@ class DocumentDetail(DocumentSummary):
     # (the AiJob hasn't been claimed by the worker), which the frontend
     # treats identically to PENDING: still show the "Analyzing…" badge.
     extraction_status: ExtractionStatus | None = None
+    # AI feature track (Phase 2) — null whenever there's nothing to show yet
+    # (no job run, still pending, or it failed); the UI simply omits the card.
+    ai_suggestion: AiSuggestion | None = None
 
 
 class DocumentCreateMetadata(CamelModel):

@@ -45,6 +45,7 @@ class ExtractionStatus(str, enum.Enum):
 
 class AiJobType(str, enum.Enum):
     EXTRACT = "EXTRACT"
+    GENERATE_METADATA = "GENERATE_METADATA"
 
 
 class AiJobStatus(str, enum.Enum):
@@ -52,3 +53,10 @@ class AiJobStatus(str, enum.Enum):
     PROCESSING = "PROCESSING"
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
+
+
+class AiAnalysisStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+    SKIPPED = "SKIPPED"

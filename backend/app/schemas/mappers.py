@@ -1,8 +1,9 @@
 import uuid
 
 from app.db.models import Document, DocumentVersion
+from app.db.models.enums import AiAnalysisStatus
 from app.schemas.auth import UserSummary
-from app.schemas.document import CategorySummary, DocumentDetail, DocumentSummary, TagSummary
+from app.schemas.document import AiSuggestion, CategorySummary, DocumentDetail, DocumentSummary, TagSummary
 from app.schemas.trash import TrashedDocumentItem
 from app.schemas.version import VersionDetail, VersionSummary
 
@@ -49,6 +50,14 @@ def to_document_summary(document: Document) -> DocumentSummary:
     )
 
 
+def _to_ai_suggestion(document: Document) -> AiSuggestion | None:
+    version = document.current_version
+    analysis = version.analysis if version else None
+    if analysis is None or analysis.status != AiAnalysisStatus.SUCCEEDED:
+        return None
+    return AiSuggestion(title=analysis.suggested_title, summary=analysis.suggested_description, tags=analysis.suggested_tags or [])
+
+
 def to_document_detail(document: Document) -> DocumentDetail:
     return DocumentDetail(
         id=document.id,
@@ -70,6 +79,7 @@ def to_document_detail(document: Document) -> DocumentDetail:
             if document.current_version and document.current_version.extracted_text
             else None
         ),
+        ai_suggestion=_to_ai_suggestion(document),
     )
 
 

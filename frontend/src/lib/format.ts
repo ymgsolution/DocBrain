@@ -68,6 +68,20 @@ export function isExtractionPending(document: {
   return elapsed < EXTRACTION_TIMEOUT_MS;
 }
 
+// AI feature track — GENERATE_METADATA runs *after* extraction finishes, so
+// there's a gap where extractionStatus is already SUCCEEDED but the AI
+// suggestion job hasn't completed yet. Keep polling through that gap too,
+// same timeout window, keyed off the same upload timestamp.
+export function isAiSuggestionPending(document: {
+  extractionStatus: ExtractionStatus;
+  aiSuggestion: unknown;
+  currentVersion: { uploadedAt: string } | null;
+}): boolean {
+  if (document.extractionStatus !== "SUCCEEDED" || document.aiSuggestion || !document.currentVersion) return false;
+  const elapsed = Date.now() - new Date(document.currentVersion.uploadedAt).getTime();
+  return elapsed < EXTRACTION_TIMEOUT_MS;
+}
+
 export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB"];

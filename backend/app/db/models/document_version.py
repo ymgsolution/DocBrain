@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.db.models.ai_document_analysis import AiDocumentAnalysis
     from app.db.models.document import Document
     from app.db.models.document_extracted_text import DocumentExtractedText
     from app.db.models.user import User
@@ -60,6 +61,12 @@ class DocumentVersion(Base):
     # correctly; passive_deletes tells SQLAlchemy to trust it and not try to
     # null the FK itself.
     extracted_text: Mapped["DocumentExtractedText | None"] = relationship(
+        back_populates="document_version", uselist=False, passive_deletes=True
+    )
+    # Same passive_deletes=True reasoning as extracted_text above — this
+    # relationship isn't eager-loaded yet, but declaring it up front avoids
+    # re-discovering the hard-delete 500 the moment something does eager-load it.
+    analysis: Mapped["AiDocumentAnalysis | None"] = relationship(
         back_populates="document_version", uselist=False, passive_deletes=True
     )
 

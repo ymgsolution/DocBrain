@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.db.models import AiJob, DocumentVersion
-from app.db.models.enums import ExtractionStatus
+from app.db.models.enums import AiJobType, ExtractionStatus
 from app.storage.local_adapter import LocalFileSystemStorage
 from app.text_extraction.registry import get_extractor
 from app.text_extraction.repository import DocumentExtractedTextRepository
@@ -57,4 +57,12 @@ class TextExtractionService:
         row.char_count = result.char_count
         row.error_message = None
         row.extracted_at = datetime.now(timezone.utc)
+
+        # AI feature track (Phase 2): chained rather than enqueued unconditionally
+        # at upload time like EXTRACT — no point paying for a model call against
+        # a document with no usable text yet, and this only fires once text
+        # genuinely exists.
+        if result.char_count > 0:
+            db.add(AiJob(job_type=AiJobType.GENERATE_METADATA, document_version_id=version.id))
+
         db.commit()

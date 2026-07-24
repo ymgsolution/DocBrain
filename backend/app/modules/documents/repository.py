@@ -26,7 +26,8 @@ class DocumentRepository:
         # (DocumentSummary, which never serializes this) doesn't pay for an
         # eager-load it never uses.
         return self._base_query().options(
-            selectinload(Document.current_version).selectinload(DocumentVersion.extracted_text)
+            selectinload(Document.current_version).selectinload(DocumentVersion.extracted_text),
+            selectinload(Document.current_version).selectinload(DocumentVersion.analysis),
         )
 
     def get_active_by_id(self, document_id: uuid.UUID) -> Document | None:

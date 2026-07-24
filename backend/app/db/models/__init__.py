@@ -1,4 +1,5 @@
 from app.db.models.activity_event import ActivityEvent
+from app.db.models.ai_document_analysis import AiDocumentAnalysis
 from app.db.models.ai_job import AiJob
 from app.db.models.category import Category
 from app.db.models.document import Document
@@ -10,6 +11,7 @@ from app.db.models.user_preference import UserPreference
 
 __all__ = [
     "ActivityEvent",
+    "AiDocumentAnalysis",
     "AiJob",
     "Category",
     "Document",

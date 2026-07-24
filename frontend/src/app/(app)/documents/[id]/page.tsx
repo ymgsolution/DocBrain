@@ -17,6 +17,7 @@ import { useDocument, useSoftDeleteDocument, useRestoreDocument } from "@/featur
 import { DocumentHeader } from "@/features/documents/components/document-header";
 import { DocumentPreview } from "@/features/documents/components/document-preview";
 import { MetadataPanel } from "@/features/documents/components/metadata-panel";
+import { AiSuggestionsCard } from "@/features/documents/components/ai-suggestions-card";
 import { EditMetadataForm } from "@/features/documents/components/edit-metadata-form";
 import { MarkReviewedDialog } from "@/features/documents/components/mark-reviewed-dialog";
 import { VersionsTab } from "@/features/documents/components/versions-tab";
@@ -106,6 +107,8 @@ export default function DocumentDetailsPage() {
         onMarkReviewed={() => setMarkReviewedOpen(true)}
         onUploadVersion={() => setUploadVersionOpen(true)}
       />
+
+      <AiSuggestionsCard document={document} />
 
       <Tabs defaultValue="overview">
         <TabsList>

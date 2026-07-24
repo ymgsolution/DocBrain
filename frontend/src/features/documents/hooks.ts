@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { documentsApi } from "./api";
 import { dashboardApi } from "@/features/dashboard/api";
-import { isExtractionPending } from "@/lib/format";
+import { isExtractionPending, isAiSuggestionPending } from "@/lib/format";
 import type { DocumentCreatePayload, DocumentListFilters, DocumentUpdatePayload } from "./types";
 
 export const documentsKeys = {
@@ -50,7 +50,7 @@ export function useDocument(id: string) {
     // down / job stuck) so this never polls forever.
     refetchInterval: (query) => {
       const data = query.state.data;
-      return data && isExtractionPending(data) ? 2000 : false;
+      return data && (isExtractionPending(data) || isAiSuggestionPending(data)) ? 2000 : false;
     },
   });
 }
