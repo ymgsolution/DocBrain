@@ -1,0 +1,198 @@
+#!/usr/bin/env python3
+"""One-command setup + run for DocBrain — for judges/reviewers running this
+on a laptop that has never seen this project before.
+
+What it does, in order:
+  1. Checks that Node.js, npm, and uv are installed (won't try to install
+     them itself — that's a one-time, documented prerequisite, see README).
+  2. First run only: creates backend/.env and frontend/.env from their
+     .env.example templates, prompting once for the two values only you can
+     provide (a Supabase DATABASE_URL and a GEMINI_API_KEY). Never asks
+     again once backend/.env exists.
+  3. Installs dependencies (uv sync, npm install).
+  4. Applies database migrations.
+  5. First run only: seeds demo data.
+  6. Starts the API, the AI background worker, and the frontend dev server
+     together, and opens your browser once they're up.
+
+Usage:  python3 start.py   (or: ./start.sh / start.bat)
+Stop:   Ctrl+C — shuts down all three processes together.
+"""
+
+import platform
+import shutil
+import signal
+import subprocess
+import sys
+import threading
+import time
+import webbrowser
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+BACKEND = ROOT / "backend"
+FRONTEND = ROOT / "frontend"
+IS_WINDOWS = platform.system() == "Windows"
+
+
+def npm_cmd() -> str:
+    return "npm.cmd" if IS_WINDOWS else "npm"
+
+
+def die(message: str) -> None:
+    print(f"\n✗ {message}\n")
+    sys.exit(1)
+
+
+def check_prerequisites() -> None:
+    missing = []
+    if shutil.which("node") is None:
+        missing.append("Node.js 20+  →  https://nodejs.org")
+    if shutil.which(npm_cmd()) is None:
+        missing.append("npm (comes with Node.js)")
+    if shutil.which("uv") is None:
+        missing.append("uv  →  curl -LsSf https://astral.sh/uv/install.sh | sh")
+    if missing:
+        print("Missing required tools:\n")
+        for m in missing:
+            print(f"  - {m}")
+        die("Install the above, then re-run this script.")
+
+
+def run(cmd: list[str], cwd: Path, label: str) -> None:
+    print(f"\n▸ {label} ...")
+    result = subprocess.run(cmd, cwd=cwd)
+    if result.returncode != 0:
+        die(f"'{' '.join(cmd)}' failed (exit {result.returncode}) — see output above.")
+
+
+def prompt(label: str, hint: str) -> str:
+    print(f"\n{label}")
+    print(f"  {hint}")
+    value = input("  > ").strip()
+    while not value:
+        value = input("  (required) > ").strip()
+    return value
+
+
+def first_time_env_setup() -> bool:
+    backend_env = BACKEND / ".env"
+    frontend_env = FRONTEND / ".env"
+    first_time = not backend_env.exists()
+
+    if first_time:
+        print("=" * 60)
+        print("First run — one-time setup (saved locally, never re-asked)")
+        print("=" * 60)
+        database_url = prompt(
+            "1) Supabase DATABASE_URL",
+            "Project Settings → Database → Connection string → Session pooler",
+        )
+        gemini_key = prompt(
+            "2) Gemini API key",
+            "Free at https://aistudio.google.com/apikey",
+        )
+
+        example = (BACKEND / ".env.example").read_text()
+        content = example.replace(
+            "DATABASE_URL=postgresql+psycopg://postgres.[project-ref]:[password]@aws-0-[region].pooler.supabase.com:6543/postgres",
+            f"DATABASE_URL={database_url}",
+        ).replace("GEMINI_API_KEY=", f"GEMINI_API_KEY={gemini_key}", 1)
+        backend_env.write_text(content)
+        print("\n✓ Saved backend/.env")
+
+    if not frontend_env.exists():
+        (FRONTEND / ".env.example").read_text()
+        frontend_env.write_text((FRONTEND / ".env.example").read_text())
+        print("✓ Saved frontend/.env")
+
+    env_text = backend_env.read_text()
+    if "DATABASE_URL=\n" in env_text or "DATABASE_URL=postgresql+psycopg://postgres.[project-ref]" in env_text:
+        die("backend/.env is missing a real DATABASE_URL — edit that file and re-run this script.")
+
+    return first_time
+
+
+def stream_output(proc: subprocess.Popen, label: str) -> None:
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        print(f"[{label}] {line}", end="")
+
+
+def _raise_keyboard_interrupt(signum: int, frame: object) -> None:
+    raise KeyboardInterrupt
+
+
+def main() -> None:
+    # Ctrl+C delivers SIGINT and Python already turns that into
+    # KeyboardInterrupt on its own. Also handle SIGTERM explicitly, so
+    # stopping this via a process manager, IDE "stop" button, or `kill`
+    # cleans up all three child processes the same way Ctrl+C does.
+    signal.signal(signal.SIGTERM, _raise_keyboard_interrupt)
+
+    print("DocBrain — one-command setup & run\n")
+    check_prerequisites()
+    first_time = first_time_env_setup()
+
+    run(["uv", "sync"], BACKEND, "Installing backend dependencies")
+    run([npm_cmd(), "install"], FRONTEND, "Installing frontend dependencies")
+    run(["uv", "run", "alembic", "upgrade", "head"], BACKEND, "Applying database migrations")
+
+    if first_time:
+        run(["uv", "run", "python", "-m", "scripts.seed"], BACKEND, "Seeding demo data")
+        run(
+            ["uv", "run", "python", "-m", "scripts.backfill_seed_files"],
+            BACKEND,
+            "Writing demo file content",
+        )
+
+    print("\n" + "=" * 60)
+    print("Starting DocBrain (Ctrl+C to stop everything)")
+    print("=" * 60 + "\n")
+
+    processes: list[subprocess.Popen] = []
+    try:
+        api = subprocess.Popen(
+            ["uv", "run", "uvicorn", "app.main:app", "--port", "8000"],
+            cwd=BACKEND, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+        )
+        processes.append(api)
+        threading.Thread(target=stream_output, args=(api, "api"), daemon=True).start()
+
+        worker = subprocess.Popen(
+            ["uv", "run", "python", "-m", "app.ai_jobs.main"],
+            cwd=BACKEND, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+        )
+        processes.append(worker)
+        threading.Thread(target=stream_output, args=(worker, "ai-worker"), daemon=True).start()
+
+        web = subprocess.Popen(
+            [npm_cmd(), "run", "dev"],
+            cwd=FRONTEND, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+        )
+        processes.append(web)
+        threading.Thread(target=stream_output, args=(web, "web"), daemon=True).start()
+
+        time.sleep(6)
+        print("\n✓ Opening http://localhost:3000\n")
+        webbrowser.open("http://localhost:3000")
+
+        while all(p.poll() is None for p in processes):
+            time.sleep(1)
+        die("One of the processes exited unexpectedly — see output above.")
+    except KeyboardInterrupt:
+        print("\n\nStopping...")
+    finally:
+        for p in processes:
+            if p.poll() is None:
+                p.terminate()
+        for p in processes:
+            try:
+                p.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                p.kill()
+        print("Stopped.")
+
+
+if __name__ == "__main__":
+    main()
