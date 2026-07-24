@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { documentsApi } from "./api";
 import { dashboardApi } from "@/features/dashboard/api";
+import { isExtractionPending } from "@/lib/format";
 import type { DocumentCreatePayload, DocumentListFilters, DocumentUpdatePayload } from "./types";
 
 export const documentsKeys = {
@@ -43,12 +44,13 @@ export function useDocument(id: string) {
   return useQuery({
     queryKey: documentsKeys.detail(id),
     queryFn: () => documentsApi.get(id),
-    // AI feature track — poll while extraction hasn't finished yet (null or
-    // PENDING) so the "Analyzing…" badge clears on its own; stop polling the
-    // instant it lands on a terminal status.
+    // AI feature track — poll while extraction hasn't finished yet, so the
+    // "Analyzing…" badge clears on its own; stops the instant it lands on a
+    // terminal status, or after isExtractionPending's own timeout (worker
+    // down / job stuck) so this never polls forever.
     refetchInterval: (query) => {
-      const status = query.state.data?.extractionStatus;
-      return status === null || status === "PENDING" ? 2000 : false;
+      const data = query.state.data;
+      return data && isExtractionPending(data) ? 2000 : false;
     },
   });
 }

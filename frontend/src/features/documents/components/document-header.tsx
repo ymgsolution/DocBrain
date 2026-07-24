@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { FileTypeIcon } from "@/components/shared/file-type-icon";
 import { ReviewStatusBadge } from "@/components/shared/status-badge";
 import { DownloadLink } from "@/components/shared/download-link";
-import { getReviewStatus } from "@/lib/format";
+import { getReviewStatus, isExtractionPending } from "@/lib/format";
 import type { DocumentDetail } from "@/types/document";
 import type { UserSummary } from "@/features/auth/types";
 
@@ -49,8 +49,10 @@ export function DocumentHeader({
             {/* AI feature track — quiet, self-clearing; no error state shown
                 for FAILED/UNSUPPORTED, matching the app's graceful-degradation
                 pattern for background AI work (nothing to act on, so nothing
-                shown). */}
-            {(document.extractionStatus === null || document.extractionStatus === "PENDING") && (
+                shown). isExtractionPending also times out on its own after a
+                couple of minutes, so this never spins forever if the worker
+                is down or a job is stuck. */}
+            {isExtractionPending(document) && (
               <Badge variant="outline" className="gap-1 font-normal">
                 <Loader2 className="size-3 animate-spin" />
                 Analyzing document…

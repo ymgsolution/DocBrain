@@ -1,4 +1,4 @@
-import type { ReviewStatus } from "@/types/document";
+import type { ExtractionStatus, ReviewStatus } from "@/types/document";
 
 export function getInitials(name: string): string {
   return name
@@ -43,6 +43,29 @@ export function getReviewStatus(reviewDueDate: string | null): ReviewStatus {
   if (due.getTime() < today.getTime()) return "overdue";
   if (due.getTime() <= today.getTime() + horizonMs) return "due_soon";
   return "ok";
+}
+
+// AI feature track — 2 minutes: parsing is fast, so if a version's
+// extraction hasn't resolved by then, the worker is probably down or the job
+// is stuck. Shared by the badge (whether to render) and useDocument's
+// refetchInterval (whether to keep polling), so they can never disagree —
+// no case where polling silently stops but the spinner is still shown, or
+// vice versa. Keyed off the version's own uploadedAt, not "now minus mount
+// time" or the document's updatedAt (which also moves on unrelated edits) —
+// a backfilled document uploaded long ago should never show this badge, even
+// while its one-time catch-up job is genuinely in flight; the badge's job is
+// "something is happening for what you just uploaded," not "surface every
+// background job's state."
+const EXTRACTION_TIMEOUT_MS = 2 * 60 * 1000;
+
+export function isExtractionPending(document: {
+  extractionStatus: ExtractionStatus;
+  currentVersion: { uploadedAt: string } | null;
+}): boolean {
+  const unresolved = document.extractionStatus === null || document.extractionStatus === "PENDING";
+  if (!unresolved || !document.currentVersion) return false;
+  const elapsed = Date.now() - new Date(document.currentVersion.uploadedAt).getTime();
+  return elapsed < EXTRACTION_TIMEOUT_MS;
 }
 
 export function formatFileSize(bytes: number): string {
