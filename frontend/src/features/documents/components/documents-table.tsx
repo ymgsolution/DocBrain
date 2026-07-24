@@ -14,15 +14,15 @@ export function DocumentsTable({ documents }: { documents: DocumentSummary[] }) 
 
   return (
     <div className="overflow-hidden rounded-xl ring-1 ring-foreground/10">
-      <Table>
+      <Table className="table-fixed">
         <TableHeader>
           <TableRow className="hover:bg-transparent">
-            <TableHead>Title</TableHead>
-            <TableHead>Category</TableHead>
-            <TableHead>Owner</TableHead>
-            <TableHead>Version</TableHead>
-            <TableHead>Review</TableHead>
-            <TableHead>Updated</TableHead>
+            <TableHead className="w-[32%]">Title</TableHead>
+            <TableHead className="w-[14%]">Category</TableHead>
+            <TableHead className="w-[18%]">Owner</TableHead>
+            <TableHead className="w-[8%]">Version</TableHead>
+            <TableHead className="w-[13%]">Review</TableHead>
+            <TableHead className="w-[15%]">Updated</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -32,7 +32,7 @@ export function DocumentsTable({ documents }: { documents: DocumentSummary[] }) 
               className="cursor-pointer"
               onClick={() => router.push(`/documents/${document.id}`)}
             >
-              <TableCell className="max-w-xs">
+              <TableCell>
                 <div className="flex items-center gap-2.5">
                   <div className="bg-muted text-muted-foreground flex size-8 shrink-0 items-center justify-center rounded-md">
                     <FileTypeIcon
@@ -44,7 +44,7 @@ export function DocumentsTable({ documents }: { documents: DocumentSummary[] }) 
                     <Link
                       href={`/documents/${document.id}`}
                       onClick={(e) => e.stopPropagation()}
-                      className="hover:text-primary truncate text-sm font-medium"
+                      className="hover:text-primary block truncate text-sm font-medium"
                     >
                       {document.title}
                     </Link>
@@ -54,18 +54,18 @@ export function DocumentsTable({ documents }: { documents: DocumentSummary[] }) 
                   </div>
                 </div>
               </TableCell>
-              <TableCell className="text-muted-foreground text-sm">{document.category.name}</TableCell>
+              <TableCell className="text-muted-foreground truncate text-sm">{document.category.name}</TableCell>
               <TableCell>
-                <div className="flex items-center gap-2">
-                  <UserAvatar name={document.owner.displayName} className="size-6" />
-                  <span className="text-sm">{document.owner.displayName}</span>
+                <div className="flex min-w-0 items-center gap-2">
+                  <UserAvatar name={document.owner.displayName} className="size-6 shrink-0" />
+                  <span className="truncate text-sm">{document.owner.displayName}</span>
                 </div>
               </TableCell>
               <TableCell className="text-muted-foreground text-sm tabular-nums">v{document.versionCount}</TableCell>
-              <TableCell>
+              <TableCell className="overflow-hidden">
                 <ReviewStatusBadge status={getReviewStatus(document.reviewDueDate)} />
               </TableCell>
-              <TableCell className="text-muted-foreground text-sm">{formatRelativeTime(document.updatedAt)}</TableCell>
+              <TableCell className="text-muted-foreground truncate text-sm">{formatRelativeTime(document.updatedAt)}</TableCell>
             </TableRow>
           ))}
         </TableBody>
