@@ -28,15 +28,34 @@ def run_once(db: Session, *, handlers: dict[AiJobType, JobHandler], batch_size: 
     for job_type, handler in handlers.items():
         jobs = repository.claim_batch(job_type=job_type, limit=batch_size)
         for job in jobs:
+            # Captured before the handler runs: if it fails mid-flush, the
+            # ORM object's attributes may no longer be safely readable (see
+            # below), so logging never depends on touching `job` again.
+            job_id, attempt_count = job.id, job.attempt_count
             try:
                 handler(db, job)
                 repository.mark_succeeded(job)
             except Exception as exc:
-                logger.exception(
-                    "ai_job %s failed (job_type=%s, attempt=%s)", job.id, job_type.value, job.attempt_count
-                )
+                # Must roll back *before* any further ORM access, not after.
+                # A handler failure during a flush (e.g. a FK violation)
+                # leaves the session in "pending rollback" — the next ORM
+                # attribute access raises PendingRollbackError instead of
+                # returning a value, which used to happen right here in the
+                # logging call, masking the real error and crashing the
+                # whole worker process instead of just failing this job.
                 db.rollback()
-                repository.mark_failed(job, error=str(exc))
+                logger.exception(
+                    "ai_job %s failed (job_type=%s, attempt=%s)", job_id, job_type.value, attempt_count
+                )
+                try:
+                    repository.mark_failed(job, error=str(exc))
+                except Exception:
+                    # The job's own row can legitimately be gone by now too
+                    # (e.g. its parent document was hard-deleted mid-flight,
+                    # which cascades to this exact ai_jobs row) — nothing
+                    # left to mark failed, which isn't itself a failure.
+                    logger.warning("ai_job %s: could not mark as failed, its row may no longer exist", job_id)
+                    db.rollback()
             processed += 1
     return processed
 
