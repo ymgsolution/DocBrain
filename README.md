@@ -31,6 +31,11 @@ Built for the Ahmedabad AI Hackathon.
 - **Node.js** 20 or later
 - **Python** 3.11 or later
 - **[uv](https://docs.astral.sh/uv/getting-started/installation/)** — Python package/venv manager (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
+- **libmagic** — a system library the backend uses to detect file types on upload. It's a separate C library, not something `uv sync`/`pip` can install for you:
+  - **macOS**: `brew install libmagic`
+  - **Ubuntu / Debian**: `sudo apt update && sudo apt install libmagic1 libmagic-dev`
+  - **Windows**: `pip install python-magic-bin` (installs a bundled libmagic — do this *instead of* the system-library step, no separate download needed)
+  - Without this, the backend fails to start at all (not just file uploads) — `app/utils/file_validation.py` imports it at module load time.
 - **A Supabase project** (free tier is enough) — you'll need its Postgres connection string
 - **A Gemini API key** — free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
 
@@ -50,7 +55,7 @@ That's it. On the very first run it asks you to paste in two things — a **Supa
 
 Press `Ctrl+C` in that terminal to stop everything cleanly.
 
-> Needs Node.js, Python, and `uv` already installed — see [Prerequisites](#prerequisites) below. The script checks for these and tells you exactly what's missing if not.
+> Needs Node.js, Python, `uv`, and libmagic already installed — see [Prerequisites](#prerequisites) below. The script checks for these and tells you exactly what's missing if not.
 
 If you'd rather run each piece yourself (or the quick-start script doesn't work in your environment), the full manual steps are below.
 
@@ -115,7 +120,7 @@ Use the Session/Transaction **pooler** connection string from your Supabase proj
 
 ```bash
 cd backend
-uv run alembic upgrade head
+uv run python -m alembic upgrade head
 uv run python -m scripts.seed              # creates demo users, categories, tags, documents
 uv run python -m scripts.backfill_seed_files  # writes real file content for the seeded documents
 ```
@@ -127,7 +132,7 @@ You need two backend processes running at once — the API and the AI worker:
 ```bash
 # Terminal 1 — API server
 cd backend
-uv run uvicorn app.main:app --reload --port 8000
+uv run python -m uvicorn app.main:app --reload --port 8000
 
 # Terminal 2 — AI worker (extraction + Gemini suggestions run here, out-of-band)
 cd backend

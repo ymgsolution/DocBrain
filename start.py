@@ -9,7 +9,10 @@ What it does, in order:
      .env.example templates, prompting once for the two values only you can
      provide (a Supabase DATABASE_URL and a GEMINI_API_KEY). Never asks
      again once backend/.env exists.
-  3. Installs dependencies (uv sync, npm install).
+  3. Installs dependencies (uv sync, npm install), then checks libmagic (a
+     system library, not something uv/pip can install) actually works —
+     fails fast with a platform-specific fix instead of a confusing crash
+     later.
   4. Applies database migrations.
   5. First run only: seeds demo data.
   6. Starts the API, the AI background worker, and the frontend dev server
@@ -57,6 +60,30 @@ def check_prerequisites() -> None:
         for m in missing:
             print(f"  - {m}")
         die("Install the above, then re-run this script.")
+
+
+def check_libmagic() -> None:
+    """python-magic (a backend dependency) wraps the *system* libmagic C
+    library — installing the Python package (uv sync, just above) does not
+    install libmagic itself. Without it, the backend fails at startup, not
+    just on upload, because app/utils/file_validation.py imports it at
+    module load time. Checked here, right after uv sync gives us a venv to
+    check from, so this fails fast with a clear fix instead of a confusing
+    crash several steps later."""
+    result = subprocess.run(
+        ["uv", "run", "python", "-c", "import magic"], cwd=BACKEND, capture_output=True
+    )
+    if result.returncode == 0:
+        return
+
+    print("\nMissing system library: libmagic (used to detect file types on upload)\n")
+    if IS_WINDOWS:
+        print("  Fix:  pip install python-magic-bin")
+    elif platform.system() == "Darwin":
+        print("  Fix:  brew install libmagic")
+    else:
+        print("  Fix:  sudo apt update && sudo apt install libmagic1 libmagic-dev")
+    die("Install the above, then re-run this script.")
 
 
 def run(cmd: list[str], cwd: Path, label: str) -> None:
@@ -135,8 +162,9 @@ def main() -> None:
     first_time = first_time_env_setup()
 
     run(["uv", "sync"], BACKEND, "Installing backend dependencies")
+    check_libmagic()
     run([npm_cmd(), "install"], FRONTEND, "Installing frontend dependencies")
-    run(["uv", "run", "alembic", "upgrade", "head"], BACKEND, "Applying database migrations")
+    run(["uv", "run", "python", "-m", "alembic", "upgrade", "head"], BACKEND, "Applying database migrations")
 
     if first_time:
         run(["uv", "run", "python", "-m", "scripts.seed"], BACKEND, "Seeding demo data")
@@ -153,7 +181,7 @@ def main() -> None:
     processes: list[subprocess.Popen] = []
     try:
         api = subprocess.Popen(
-            ["uv", "run", "uvicorn", "app.main:app", "--port", "8000"],
+            ["uv", "run", "python", "-m", "uvicorn", "app.main:app", "--port", "8000"],
             cwd=BACKEND, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
         )
         processes.append(api)
