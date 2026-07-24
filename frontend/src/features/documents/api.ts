@@ -85,8 +85,15 @@ function xhrUpload<T>(url: string, formData: FormData, onProgress: (percent: num
       } else {
         // Same 401 contract as apiClient's handleResponse — a session that
         // expired while the upload dialog was open shouldn't dead-end here.
+        // Must clear the cookie before navigating (see the matching comment
+        // in api-client.ts) or the auth guard bounces /login back to / in
+        // an infinite loop instead of ever reaching the login page.
         if (xhr.status === 401 && typeof window !== "undefined") {
-          window.location.href = `/login?next=${encodeURIComponent(window.location.pathname)}`;
+          fetch("/api/auth/logout", { method: "POST" })
+            .catch(() => {})
+            .finally(() => {
+              window.location.href = `/login?next=${encodeURIComponent(window.location.pathname)}`;
+            });
         }
         reject(new ApiError(xhr.status, data as ApiErrorBody));
       }

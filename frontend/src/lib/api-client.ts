@@ -40,6 +40,14 @@ async function handleResponse<T>(response: Response): Promise<T> {
 
   if (!response.ok) {
     if (response.status === 401 && typeof window !== "undefined") {
+      // Must clear the session cookie before navigating, not just redirect —
+      // the cookie is httpOnly (unreadable/undeletable from here directly),
+      // and proxy.ts's auth guard only checks *presence*, not validity. A
+      // stale/expired cookie left in place makes it treat this navigation to
+      // /login as "already logged in" and immediately bounce back to /,
+      // which 401s again — an infinite reload loop instead of ever reaching
+      // the login page.
+      await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
       window.location.href = `/login?next=${encodeURIComponent(window.location.pathname)}`;
     }
     throw new ApiError(response.status, data as ApiErrorBody);
