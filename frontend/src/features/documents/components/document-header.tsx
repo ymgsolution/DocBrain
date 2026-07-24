@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { FileTypeIcon } from "@/components/shared/file-type-icon";
 import { ReviewStatusBadge } from "@/components/shared/status-badge";
 import { DownloadLink } from "@/components/shared/download-link";
-import { getReviewStatus, isExtractionPending } from "@/lib/format";
+import { getReviewStatus, isExtractionPending, isAiSuggestionPending } from "@/lib/format";
 import type { DocumentDetail } from "@/types/document";
 import type { UserSummary } from "@/features/auth/types";
 
@@ -49,14 +49,24 @@ export function DocumentHeader({
             {/* AI feature track — quiet, self-clearing; no error state shown
                 for FAILED/UNSUPPORTED, matching the app's graceful-degradation
                 pattern for background AI work (nothing to act on, so nothing
-                shown). isExtractionPending also times out on its own after a
-                couple of minutes, so this never spins forever if the worker
-                is down or a job is stuck. */}
-            {isExtractionPending(document) && (
+                shown). Both timeouts happen automatically after a couple of
+                minutes, so this never spins forever if the worker is down or
+                a job is stuck. Two distinct phases, not one generic spinner —
+                extraction finishing but Gemini still running is a real gap
+                (seconds, not instant) that otherwise looks like nothing is
+                happening at all. */}
+            {isExtractionPending(document) ? (
               <Badge variant="outline" className="gap-1 font-normal">
                 <Loader2 className="size-3 animate-spin" />
                 Analyzing document…
               </Badge>
+            ) : (
+              isAiSuggestionPending(document) && (
+                <Badge variant="outline" className="gap-1 font-normal">
+                  <Loader2 className="size-3 animate-spin" />
+                  Getting AI suggestions…
+                </Badge>
+              )
             )}
           </div>
           {document.description && <p className="text-muted-foreground mt-1 text-sm">{document.description}</p>}
