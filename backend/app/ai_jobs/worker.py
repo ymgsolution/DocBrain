@@ -47,8 +47,22 @@ def run_once(db: Session, *, handlers: dict[AiJobType, JobHandler], batch_size: 
                 logger.exception(
                     "ai_job %s failed (job_type=%s, attempt=%s)", job_id, job_type.value, attempt_count
                 )
+                # A handler's exception can optionally carry scheduling
+                # hints (e.g. "this was a quota error, wait much longer" or
+                # "this can never succeed, don't retry at all") via these
+                # two attributes — read generically via getattr(), not an
+                # isinstance check against any specific exception type, so
+                # this worker stays domain-agnostic: it has no idea what
+                # AIQuotaExceededError is, only that *some* exception raised
+                # by *some* handler happened to set retry_after_seconds.
+                # Anything that doesn't set them (the common case, and every
+                # non-AI job type today) gets the existing default behavior.
+                retry_after_seconds = getattr(exc, "retry_after_seconds", None)
+                permanent = getattr(exc, "permanent", False)
                 try:
-                    repository.mark_failed(job, error=str(exc))
+                    repository.mark_failed(
+                        job, error=str(exc), retry_after_seconds=retry_after_seconds, permanent=permanent
+                    )
                 except Exception:
                     # The job's own row can legitimately be gone by now too
                     # (e.g. its parent document was hard-deleted mid-flight,

@@ -82,6 +82,12 @@ export function isAiSuggestionPending(document: {
   return elapsed < EXTRACTION_TIMEOUT_MS;
 }
 
+// Similar Document Detection track — the API returns a 0..1 cosine
+// similarity; the card just wants a whole-number percentage.
+export function formatSimilarityScore(similarity: number): string {
+  return `${Math.round(similarity * 100)}%`;
+}
+
 export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB"];

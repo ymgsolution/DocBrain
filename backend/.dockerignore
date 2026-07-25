@@ -1,0 +1,15 @@
+# Secrets must never be baked into the image — production values come from
+# the host's environment variables instead.
+.env
+
+# Local-only artifacts; uploads/ is dev-mode storage (production uses
+# Supabase Storage), and shipping a stale local venv would shadow the one
+# uv builds inside the image.
+.venv
+uploads/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+tests/

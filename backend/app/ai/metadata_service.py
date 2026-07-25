@@ -9,7 +9,7 @@ from app.ai.schemas import MetadataSuggestion
 from app.core.config import get_settings
 from app.db.models import AiJob, Document, DocumentVersion
 from app.db.models.enums import AiAnalysisStatus, ExtractionStatus
-from app.storage.local_adapter import LocalFileSystemStorage
+from app.storage.port import StoragePort
 from app.text_extraction.repository import DocumentExtractedTextRepository
 
 _PROMPT_NAME = "metadata_generation"
@@ -25,7 +25,7 @@ class MetadataGenerationService:
     reasoning applied defensively, in case a job is ever enqueued before
     extraction finishes)."""
 
-    def __init__(self, provider: AIProvider, storage: LocalFileSystemStorage, *, model_name: str) -> None:
+    def __init__(self, provider: AIProvider, storage: StoragePort, *, model_name: str) -> None:
         self.provider = provider
         self.storage = storage
         self.model_name = model_name

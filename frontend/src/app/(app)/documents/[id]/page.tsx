@@ -18,6 +18,7 @@ import { DocumentHeader } from "@/features/documents/components/document-header"
 import { DocumentPreview } from "@/features/documents/components/document-preview";
 import { MetadataPanel } from "@/features/documents/components/metadata-panel";
 import { AiSuggestionsCard } from "@/features/documents/components/ai-suggestions-card";
+import { SimilarDocumentsCard } from "@/features/documents/components/similar-documents-card";
 import { EditMetadataForm } from "@/features/documents/components/edit-metadata-form";
 import { MarkReviewedDialog } from "@/features/documents/components/mark-reviewed-dialog";
 import { VersionsTab } from "@/features/documents/components/versions-tab";
@@ -109,6 +110,8 @@ export default function DocumentDetailsPage() {
       />
 
       <AiSuggestionsCard document={document} />
+
+      <SimilarDocumentsCard documentId={document.id} />
 
       <Tabs defaultValue="overview">
         <TabsList>

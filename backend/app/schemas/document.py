@@ -41,6 +41,21 @@ class AiSuggestion(CamelModel):
     title: str | None = None
     summary: str | None = None
     tags: list[str] = Field(default_factory=list)
+    # True once a user has finished acting on this suggestion (accepted or
+    # dismissed its title/tags) — POST /documents/{id}/ai-suggestion/review.
+    # Lets the frontend stop re-offering an already-handled suggestion after
+    # a refresh instead of only remembering it for the current page view.
+    accepted: bool = False
+
+
+class SimilarDocument(DocumentSummary):
+    """Similar Document Detection track — a document, plus how similar it is
+    to whichever document was queried (cosine similarity, 0..1). A separate
+    endpoint/schema rather than a DocumentDetail field: unlike ai_suggestion
+    (a passive read off the current row), this is an active nearest-neighbor
+    query against every other document's embedding."""
+
+    similarity: float
 
 
 class DocumentDetail(DocumentSummary):

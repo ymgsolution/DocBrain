@@ -8,7 +8,8 @@ from app.db.models import ActivityEvent, AiJob, Category, Document, DocumentVers
 from app.db.models.enums import ActivityEventType, AiJobType, DocumentStatus, UserRole
 from app.modules.documents.repository import DocumentRepository
 from app.storage.checksum import sha256_of_stream
-from app.storage.local_adapter import LocalFileSystemStorage
+from app.storage.factory import get_storage
+from app.storage.port import StoragePort
 from app.utils.file_validation import (
     sniff_mime_type,
     validate_content_matches_extension,
@@ -36,9 +37,17 @@ def _default_review_date(category: Category) -> date | None:
 
 
 class DocumentService:
-    def __init__(self, repository: DocumentRepository, storage: LocalFileSystemStorage) -> None:
+    def __init__(self, repository: DocumentRepository, storage: StoragePort) -> None:
         self.repository = repository
         self.storage = storage
+
+    def _storage_for(self, provider: str) -> StoragePort:
+        """Mirrors VersionService._storage_for — prefer the injected adapter
+        when it already speaks this version's provider, fall back to the
+        factory only for a genuinely different one (see its docstring)."""
+        if provider == self.storage.provider_name:
+            return self.storage
+        return get_storage(provider)
 
     def create_document(
         self,
@@ -88,6 +97,7 @@ class DocumentService:
                 document_id=document.id,
                 version_number=1,
                 storage_path=storage_path,
+                storage_provider=self.storage.provider_name,
                 original_filename=file.filename or "upload",
                 mime_type=mime_type,
                 size_bytes=size_bytes,
@@ -244,10 +254,20 @@ class DocumentService:
         if document.status != DocumentStatus.DELETED:
             raise ValidationError("Only documents already in Trash can be permanently deleted.")
 
+        # (path, storage_provider) pairs, not just paths — a version written
+        # under a since-changed STORAGE_PROVIDER default must still be
+        # deleted from the provider that actually holds it (see
+        # storage_provider column on DocumentVersion), not wherever
+        # self.storage currently points.
         storage_paths = self.repository.list_version_storage_paths(document.id)
         # AI feature track: DocumentExtractedText/AiJob rows cascade-delete
         # for free via FK ondelete, but the .txt files on disk don't — same
         # reason storage_paths above needs collecting before the purge.
+        # Extracted-text files aren't provider-tagged (they're a short-lived
+        # derived artifact written moments after the original upload, not a
+        # long-lived user-facing read) — deleted via self.storage, same as
+        # before; a leftover orphan .txt on the "wrong" provider after a
+        # STORAGE_PROVIDER flip is a low-severity cleanup gap, not data loss.
         extracted_text_paths = self.repository.list_extracted_text_paths(document.id)
 
         document.current_version_id = None
@@ -256,7 +276,7 @@ class DocumentService:
         self.repository.db.delete(document)  # cascades to versions/tags/activity per FK ondelete
         self.repository.db.commit()
 
-        for path in storage_paths:
-            self.storage.delete(path)
+        for path, provider in storage_paths:
+            self._storage_for(provider).delete(path)
         for path in extracted_text_paths:
             self.storage.delete(path)

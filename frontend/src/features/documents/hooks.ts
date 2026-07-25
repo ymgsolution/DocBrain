@@ -12,6 +12,7 @@ export const documentsKeys = {
   detail: (id: string) => ["documents", "detail", id] as const,
   versions: (id: string) => ["documents", "versions", id] as const,
   activity: (id: string) => ["documents", "activity", id] as const,
+  similar: (id: string) => ["documents", "similar", id] as const,
 };
 
 export function useDocuments(filters: DocumentListFilters) {
@@ -59,6 +60,21 @@ export function useDocumentVersions(id: string) {
   return useQuery({
     queryKey: documentsKeys.versions(id),
     queryFn: () => documentsApi.listVersions(id),
+  });
+}
+
+export function useReviewAiSuggestion(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => documentsApi.reviewAiSuggestion(id),
+    onSuccess: () => invalidateAfterDocumentChange(queryClient, id),
+  });
+}
+
+export function useSimilarDocuments(id: string) {
+  return useQuery({
+    queryKey: documentsKeys.similar(id),
+    queryFn: () => documentsApi.listSimilar(id),
   });
 }
 
