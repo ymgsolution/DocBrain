@@ -40,6 +40,10 @@ export const documentsApi = {
     return apiClient.get<SimilarDocument[]>(`/documents/${id}/similar`);
   },
 
+  reviewAiSuggestion(id: string): Promise<DocumentDetail> {
+    return apiClient.post<DocumentDetail>(`/documents/${id}/ai-suggestion/review`);
+  },
+
   restoreVersion(id: string, versionNumber: number): Promise<VersionDetail> {
     return apiClient.post<VersionDetail>(`/documents/${id}/versions/${versionNumber}/restore`, {});
   },

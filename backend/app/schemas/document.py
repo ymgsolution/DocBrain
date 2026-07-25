@@ -41,6 +41,11 @@ class AiSuggestion(CamelModel):
     title: str | None = None
     summary: str | None = None
     tags: list[str] = Field(default_factory=list)
+    # True once a user has finished acting on this suggestion (accepted or
+    # dismissed its title/tags) — POST /documents/{id}/ai-suggestion/review.
+    # Lets the frontend stop re-offering an already-handled suggestion after
+    # a refresh instead of only remembering it for the current page view.
+    accepted: bool = False
 
 
 class SimilarDocument(DocumentSummary):

@@ -62,7 +62,12 @@ def _to_ai_suggestion(document: Document) -> AiSuggestion | None:
     analysis = version.analysis if version else None
     if analysis is None or analysis.status != AiAnalysisStatus.SUCCEEDED:
         return None
-    return AiSuggestion(title=analysis.suggested_title, summary=analysis.suggested_description, tags=analysis.suggested_tags or [])
+    return AiSuggestion(
+        title=analysis.suggested_title,
+        summary=analysis.suggested_description,
+        tags=analysis.suggested_tags or [],
+        accepted=bool(analysis.accepted),
+    )
 
 
 def to_document_detail(document: Document) -> DocumentDetail:

@@ -46,6 +46,7 @@ export interface AiSuggestion {
   title: string | null;
   summary: string | null;
   tags: string[];
+  accepted: boolean;
 }
 
 // Similar Document Detection track — a document plus how similar it is

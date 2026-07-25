@@ -4,6 +4,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy.orm import Session
 
+from app.ai.analysis_repository import AiDocumentAnalysisRepository
 from app.ai.embedding_repository import DocumentVectorEmbeddingRepository
 from app.ai.similarity_service import SimilarityService
 from app.core.dependencies import get_current_user
@@ -26,6 +27,10 @@ def get_document_service(db: Session = Depends(get_db_session)) -> DocumentServi
 
 def get_similarity_service(db: Session = Depends(get_db_session)) -> SimilarityService:
     return SimilarityService(DocumentVectorEmbeddingRepository(db), DocumentRepository(db))
+
+
+def get_analysis_repository(db: Session = Depends(get_db_session)) -> AiDocumentAnalysisRepository:
+    return AiDocumentAnalysisRepository(db)
 
 
 @router.get("", response_model=PagedDocuments)
@@ -130,6 +135,19 @@ def get_similar_documents(
     service.get_detail(document_id)  # 404s via NotFoundError if missing/inactive, same as GET /documents/{id}
     results = similarity.find_similar_documents(document_id, limit=limit)
     return [to_similar_document(document, score) for document, score in results]
+
+
+@router.post("/{document_id}/ai-suggestion/review", response_model=DocumentDetail)
+def review_ai_suggestion(
+    document_id: uuid.UUID,
+    service: DocumentService = Depends(get_document_service),
+    analysis_repo: AiDocumentAnalysisRepository = Depends(get_analysis_repository),
+    current_user: User = Depends(get_current_user),
+) -> DocumentDetail:
+    document = service.get_detail(document_id)
+    if document.current_version is not None:
+        analysis_repo.mark_reviewed(document.current_version.id, accepted_by=current_user.id)
+    return to_document_detail(document)
 
 
 @router.patch("/{document_id}", response_model=DocumentDetail)

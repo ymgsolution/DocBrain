@@ -63,6 +63,14 @@ export function useDocumentVersions(id: string) {
   });
 }
 
+export function useReviewAiSuggestion(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => documentsApi.reviewAiSuggestion(id),
+    onSuccess: () => invalidateAfterDocumentChange(queryClient, id),
+  });
+}
+
 export function useSimilarDocuments(id: string) {
   return useQuery({
     queryKey: documentsKeys.similar(id),
