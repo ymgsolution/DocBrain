@@ -190,6 +190,43 @@ DocBrain/
         └── components/          # shared UI components
 ```
 
+## Deployment
+
+DocBrain deploys as **three pieces**: the API and the AI worker (both from
+`backend/Dockerfile`, same image, different start commands) and the Next.js
+frontend. Postgres and file storage are already hosted on Supabase.
+
+The browser only ever talks to the frontend, which proxies to the API
+server-side — so the API needs no CORS configuration and can stay a private
+service.
+
+**Backend + worker** (Railway, Render, Fly.io — anything that runs a Dockerfile):
+
+| | API service | Worker service |
+|---|---|---|
+| Root directory | `backend` | `backend` |
+| Start command | *(image default)* | `python -m app.ai_jobs.main` |
+| Public domain | yes | **no** — background process |
+
+Both services need the same environment variables as `backend/.env`
+(`DATABASE_URL`, `JWT_SECRET`, `GEMINI_API_KEY`, `STORAGE_PROVIDER=supabase`,
+and the four `SUPABASE_STORAGE_*` values). Generate a real `JWT_SECRET` —
+never deploy the placeholder from `.env.example`.
+
+Database migrations run automatically when the API service starts. The
+worker deliberately doesn't run them, so two services booting at once can't
+race applying the same revision.
+
+**Frontend** (Vercel): root directory `frontend`, with one environment
+variable — `API_BASE_URL` set to the API service's public URL.
+
+To verify the image locally before deploying:
+
+```bash
+cd backend && docker build -t docbrain-api .
+docker run -p 8100:8100 -e PORT=8100 --env-file .env docbrain-api
+```
+
 ## Tests
 
 ```bash
