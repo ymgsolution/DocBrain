@@ -6,7 +6,7 @@ show up (a version upload breaking search, a delete leaving the trash view
 inconsistent, and so on)."""
 
 import io
-from datetime import date, timedelta
+from datetime import timedelta
 
 from fastapi.testclient import TestClient
 
@@ -14,7 +14,7 @@ from app.db.models import Category, User
 
 
 def test_upload_search_version_download_review_and_delete(
-    client: TestClient, auth, employee: User, admin: User, reviewer: User, category: Category
+    client: TestClient, auth, employee: User, admin: User, reviewer: User, category: Category, today
 ) -> None:
     owner = auth(employee)
 
@@ -74,7 +74,7 @@ def test_upload_search_version_download_review_and_delete(
     client.patch(
         f"/api/v1/documents/{document_id}",
         headers=owner,
-        json={"reviewDueDate": (date.today() - timedelta(days=2)).isoformat()},
+        json={"reviewDueDate": (today - timedelta(days=2)).isoformat()},
     )
     pending = client.get("/api/v1/reviews/pending", headers=auth(reviewer)).json()
     assert document_id in [i["id"] for i in pending["items"]]

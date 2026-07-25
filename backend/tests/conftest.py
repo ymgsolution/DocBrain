@@ -20,6 +20,7 @@ pgvector, Postgres enums and triggers throughout.
 import logging
 import uuid
 from collections.abc import Iterator
+from datetime import date, datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -130,6 +131,18 @@ def reviewer(make_user) -> User:
 @pytest.fixture
 def admin(make_user) -> User:
     return make_user(UserRole.ADMIN)
+
+
+@pytest.fixture
+def today() -> date:
+    """Today according to **UTC**, which is the clock the app itself uses
+    (`datetime.now(timezone.utc).date()` in reviews/service.py).
+
+    Not `date.today()`: that's the machine's local date, and for any timezone
+    ahead of UTC the two disagree for the first hours of the day — which is
+    exactly how this was found, when review tests started failing at
+    00:00 IST because the app said the 25th and the test said the 26th."""
+    return datetime.now(timezone.utc).date()
 
 
 @pytest.fixture

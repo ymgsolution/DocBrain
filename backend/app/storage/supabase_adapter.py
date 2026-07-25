@@ -116,6 +116,19 @@ class SupabaseStorageAdapter:
             status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
             if status == 404:
                 raise FileNotFoundError(storage_path) from exc
+            # Same empty-body problem, different consequence: botocore
+            # renders a 403 here as the entirely contentless "An error
+            # occurred () when calling the GetObject operation:" — no code,
+            # no message, no hint that the credentials are simply wrong.
+            # That exact string cost a real debugging cycle when the
+            # deployed worker had stale keys while the API had correct ones,
+            # so re-raise with the status and the likely cause attached.
+            if status in (401, 403):
+                raise SupabaseStorageConfigError(
+                    f"Supabase rejected a read of {storage_path!r} with HTTP {status} — "
+                    "SUPABASE_STORAGE_ACCESS_KEY_ID / SUPABASE_STORAGE_SECRET_ACCESS_KEY are "
+                    "most likely wrong or revoked for this bucket."
+                ) from exc
             raise
         # Buffered into BytesIO, not returned as the raw StreamingBody:
         # confirmed live that pypdf.PdfReader needs a genuinely seekable

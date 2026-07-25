@@ -148,3 +148,36 @@ def test_open_for_read_reraises_non_404_client_errors() -> None:
 
     with pytest.raises(ClientError):
         adapter.open_for_read("documents/some-id/v1__file.pdf")
+
+
+def test_a_403_explains_that_the_credentials_are_wrong() -> None:
+    """Supabase returns 403 with an empty error body, which botocore renders
+    as the contentless "An error occurred () when calling the GetObject
+    operation:" — reproduced live against a real bucket with a bad key. That
+    string says nothing about credentials, which is exactly what made a
+    stale-key worker hard to diagnose in production."""
+    adapter = _make_adapter()
+
+    def raise_403(self: object, Bucket: str, Key: str) -> None:
+        raise ClientError(
+            {
+                "Error": {"Code": "", "Message": ""},
+                "ResponseMetadata": {
+                    "HTTPStatusCode": 403,
+                    "HTTPHeaders": {},
+                    "RequestId": "",
+                    "HostId": "",
+                    "RetryAttempts": 0,
+                },
+            },
+            "GetObject",
+        )
+
+    adapter._client = type("_FakeClient", (), {"get_object": raise_403})()
+
+    with pytest.raises(SupabaseStorageConfigError) as exc_info:
+        adapter.open_for_read("documents/some-id/v1__file.pdf")
+
+    message = str(exc_info.value)
+    assert "403" in message
+    assert "SUPABASE_STORAGE_ACCESS_KEY_ID" in message

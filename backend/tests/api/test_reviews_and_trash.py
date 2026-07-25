@@ -2,7 +2,7 @@
 two flows with real role gates on them."""
 
 import uuid
-from datetime import date, timedelta
+from datetime import timedelta
 
 from fastapi.testclient import TestClient
 
@@ -37,7 +37,7 @@ def test_an_employee_cannot_mark_a_document_reviewed(
 
 
 def test_marking_reviewed_pushes_the_due_date_out_by_the_category_period(
-    client: TestClient, auth, employee: User, reviewer: User, db_session, category: Category, upload
+    client: TestClient, auth, employee: User, reviewer: User, db_session, category: Category, upload, today
 ) -> None:
     category.default_review_period_days = 90
     db_session.flush()
@@ -48,7 +48,7 @@ def test_marking_reviewed_pushes_the_due_date_out_by_the_category_period(
     )
 
     assert response.status_code == 200
-    expected = (date.today() + timedelta(days=90)).isoformat()
+    expected = (today + timedelta(days=90)).isoformat()
     assert response.json()["reviewDueDate"] == expected
 
 
@@ -57,13 +57,13 @@ def test_pending_reviews_is_closed_to_employees(client: TestClient, auth, employ
 
 
 def test_pending_reviews_lists_a_document_that_is_due(
-    client: TestClient, auth, employee: User, reviewer: User, upload
+    client: TestClient, auth, employee: User, reviewer: User, upload, today
 ) -> None:
     document = upload(auth(employee), title="Due Very Soon")
     client.patch(
         f"/api/v1/documents/{document['id']}",
         headers=auth(employee),
-        json={"reviewDueDate": (date.today() + timedelta(days=3)).isoformat()},
+        json={"reviewDueDate": (today + timedelta(days=3)).isoformat()},
     )
 
     response = client.get("/api/v1/reviews/pending", headers=auth(reviewer))
@@ -73,13 +73,13 @@ def test_pending_reviews_lists_a_document_that_is_due(
 
 
 def test_an_overdue_document_is_reported_as_overdue(
-    client: TestClient, auth, employee: User, reviewer: User, upload
+    client: TestClient, auth, employee: User, reviewer: User, upload, today
 ) -> None:
     document = upload(auth(employee), title="Long Overdue")
     client.patch(
         f"/api/v1/documents/{document['id']}",
         headers=auth(employee),
-        json={"reviewDueDate": (date.today() - timedelta(days=10)).isoformat()},
+        json={"reviewDueDate": (today - timedelta(days=10)).isoformat()},
     )
 
     items = client.get("/api/v1/reviews/pending", headers=auth(reviewer)).json()["items"]
