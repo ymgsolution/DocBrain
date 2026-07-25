@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     ai_request_timeout_seconds: float = 30.0
     ai_max_retries: int = 3
     ai_max_extracted_text_chars: int = 20_000
+    # A 429 (quota exhausted) job gets its own, much longer backoff than a
+    # normal transient failure (see ai_jobs/repository.py) — retrying a
+    # quota error on the normal 30s/60s/120s/240s schedule just burns more
+    # of an already-exhausted free-tier budget on requests that are certain
+    # to fail again. Same exponential-with-cap shape as the generic backoff,
+    # just starting much higher.
+    ai_quota_backoff_base_seconds: int = 300
+    ai_quota_backoff_cap_seconds: int = 3600
 
     # Similar Document Detection track — same gemini_api_key gate as metadata
     # generation (app/ai_jobs/main.py). A separate, smaller char limit than

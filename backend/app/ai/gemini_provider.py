@@ -4,10 +4,18 @@ import time
 from typing import Any, TypeVar
 
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types
 from pydantic import BaseModel, ValidationError
 
-from app.ai.port import AIProviderError, AIResponse, AIResponseValidationError, TokenUsage
+from app.ai.port import (
+    AINonRetryableError,
+    AIProviderError,
+    AIQuotaExceededError,
+    AIResponse,
+    AIResponseValidationError,
+    TokenUsage,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,14 +85,29 @@ class GeminiProvider:
         raise NotImplementedError("generate_text is not implemented in this milestone — structured output only.")
 
     def _generate_with_retry(self, *, contents: str, config: types.GenerateContentConfig) -> tuple[Any, int]:
-        """Retries transient transport failures (network/5xx) only —
+        """Retries transient transport failures (network/5xx/timeouts) only —
         schema-validation failures happen after this returns and are never
-        retried here; see AIResponseValidationError."""
+        retried here; see AIResponseValidationError.
+
+        A 429 (quota exhausted) or any other 4xx is handled separately,
+        before the generic retry loop even runs: waiting a few seconds and
+        trying the identical request again cannot fix "you're out of quota"
+        or "this request is malformed" — it can only waste more of a
+        free-tier budget that's already limited. See AIQuotaExceededError/
+        AINonRetryableError.
+        """
         attempt = 0
         while True:
             try:
                 response = self._client.models.generate_content(model=self._model, contents=contents, config=config)
                 return response, attempt
+            except genai_errors.ClientError as exc:
+                if exc.code == 429:
+                    retry_after = _parse_retry_delay(exc)
+                    logger.warning("gemini quota exceeded (model=%s): %s", self._model, exc)
+                    raise AIQuotaExceededError(str(exc), retry_after_seconds=retry_after) from exc
+                logger.warning("gemini request permanently failed (model=%s, code=%s): %s", self._model, exc.code, exc)
+                raise AINonRetryableError(str(exc)) from exc
             except Exception as exc:
                 if attempt >= self._max_retries:
                     raise AIProviderError(f"Gemini request failed after {attempt + 1} attempt(s): {exc}") from exc
@@ -94,3 +117,21 @@ class GeminiProvider:
                 )
                 time.sleep(sleep_seconds)
                 attempt += 1
+
+
+def _parse_retry_delay(exc: genai_errors.ClientError) -> float | None:
+    """Gemini's 429 responses often include a structured RetryInfo detail
+    (e.g. {'@type': '...RetryInfo', 'retryDelay': '58s'}) with its own
+    suggested wait time. Best-effort: returns None if the shape isn't what
+    we expect, rather than raising — a missing hint just means the caller
+    falls back to its own default backoff."""
+    try:
+        detail_items = exc.details.get("error", {}).get("details", [])
+        for item in detail_items:
+            if str(item.get("@type", "")).endswith("RetryInfo"):
+                delay_str = str(item.get("retryDelay", ""))
+                if delay_str.endswith("s"):
+                    return float(delay_str[:-1])
+    except (AttributeError, TypeError, ValueError):
+        pass
+    return None

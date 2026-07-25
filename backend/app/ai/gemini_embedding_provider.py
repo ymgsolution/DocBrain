@@ -3,9 +3,15 @@ import time
 from typing import Any
 
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types
 
-from app.ai.embedding_port import EmbeddingProviderError, EmbeddingResponse
+from app.ai.embedding_port import (
+    EmbeddingNonRetryableError,
+    EmbeddingProviderError,
+    EmbeddingQuotaExceededError,
+    EmbeddingResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,13 +54,25 @@ class GeminiEmbeddingProvider:
         )
 
     def _embed_with_retry(self, *, contents: str, config: types.EmbedContentConfig) -> tuple[Any, int]:
-        """Retries transient transport failures (network/5xx) only — same
-        policy as GeminiProvider._generate_with_retry."""
+        """Retries transient transport failures (network/5xx/timeouts) only —
+        same policy as GeminiProvider._generate_with_retry, including the
+        same reasoning for handling 429/other-4xx separately, before the
+        generic retry loop: see EmbeddingQuotaExceededError/
+        EmbeddingNonRetryableError."""
         attempt = 0
         while True:
             try:
                 response = self._client.models.embed_content(model=self._model, contents=contents, config=config)
                 return response, attempt
+            except genai_errors.ClientError as exc:
+                if exc.code == 429:
+                    retry_after = _parse_retry_delay(exc)
+                    logger.warning("gemini embedding quota exceeded (model=%s): %s", self._model, exc)
+                    raise EmbeddingQuotaExceededError(str(exc), retry_after_seconds=retry_after) from exc
+                logger.warning(
+                    "gemini embedding request permanently failed (model=%s, code=%s): %s", self._model, exc.code, exc
+                )
+                raise EmbeddingNonRetryableError(str(exc)) from exc
             except Exception as exc:
                 if attempt >= self._max_retries:
                     raise EmbeddingProviderError(
@@ -69,3 +87,19 @@ class GeminiEmbeddingProvider:
                 )
                 time.sleep(sleep_seconds)
                 attempt += 1
+
+
+def _parse_retry_delay(exc: genai_errors.ClientError) -> float | None:
+    """Mirrors gemini_provider._parse_retry_delay — same best-effort parse
+    of Gemini's structured RetryInfo detail, intentionally duplicated for
+    the same reason the retry loop itself is."""
+    try:
+        detail_items = exc.details.get("error", {}).get("details", [])
+        for item in detail_items:
+            if str(item.get("@type", "")).endswith("RetryInfo"):
+                delay_str = str(item.get("retryDelay", ""))
+                if delay_str.endswith("s"):
+                    return float(delay_str[:-1])
+    except (AttributeError, TypeError, ValueError):
+        pass
+    return None

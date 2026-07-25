@@ -6,8 +6,9 @@ call's own SDK method/response shape (embeddings[0].values, not .text)."""
 from dataclasses import dataclass
 
 import pytest
+from google.genai import errors as genai_errors
 
-from app.ai.embedding_port import EmbeddingProviderError
+from app.ai.embedding_port import EmbeddingNonRetryableError, EmbeddingProviderError, EmbeddingQuotaExceededError
 from app.ai.gemini_embedding_provider import GeminiEmbeddingProvider
 
 VALID_VECTOR = [0.1, -0.2, 0.3, 0.05, -0.15, 0.25, 0.0, -0.1, 0.2, -0.05]
@@ -94,3 +95,47 @@ def test_raises_provider_error_after_exhausting_retries(monkeypatch: pytest.Monk
 
     with pytest.raises(EmbeddingProviderError):
         provider.generate_embedding(text="some text")
+
+
+def _make_client_error(code: int, *, status: str, retry_delay: str | None = None) -> genai_errors.ClientError:
+    """Real google.genai ClientError, same shape as test_gemini_provider.py's
+    helper — verified live against a real 429 in this session."""
+    details = [{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": retry_delay}] if retry_delay else []
+    response_json = {"error": {"code": code, "status": status, "message": f"{status} for testing", "details": details}}
+    return genai_errors.ClientError(code, response_json)
+
+
+def test_raises_quota_exceeded_immediately_on_429_without_retrying(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = _make_provider(max_retries=3)
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
+    calls = {"count": 0}
+
+    def quota_exhausted(**kwargs: object) -> _FakeEmbedResponse:
+        calls["count"] += 1
+        raise _make_client_error(429, status="RESOURCE_EXHAUSTED", retry_delay="58s")
+
+    provider._client.models.embed_content = quota_exhausted
+
+    with pytest.raises(EmbeddingQuotaExceededError) as exc_info:
+        provider.generate_embedding(text="some text")
+
+    assert calls["count"] == 1
+    assert exc_info.value.retry_after_seconds == 58.0
+
+
+def test_raises_non_retryable_error_immediately_on_other_4xx(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = _make_provider(max_retries=3)
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
+    calls = {"count": 0}
+
+    def bad_request(**kwargs: object) -> _FakeEmbedResponse:
+        calls["count"] += 1
+        raise _make_client_error(400, status="INVALID_ARGUMENT")
+
+    provider._client.models.embed_content = bad_request
+
+    with pytest.raises(EmbeddingNonRetryableError) as exc_info:
+        provider.generate_embedding(text="some text")
+
+    assert calls["count"] == 1
+    assert exc_info.value.permanent is True
