@@ -7,7 +7,7 @@ from app.ai.embedding_repository import DocumentVectorEmbeddingRepository
 from app.core.config import get_settings
 from app.db.models import AiJob, DocumentVersion
 from app.db.models.enums import AiAnalysisStatus, ExtractionStatus
-from app.storage.local_adapter import LocalFileSystemStorage
+from app.storage.port import StoragePort
 from app.text_extraction.repository import DocumentExtractedTextRepository
 
 
@@ -21,7 +21,7 @@ class EmbeddingGenerationService:
     AiJobType.GENERATE_METADATA — neither job depends on the other's
     outcome."""
 
-    def __init__(self, provider: EmbeddingProvider, storage: LocalFileSystemStorage, *, model_name: str) -> None:
+    def __init__(self, provider: EmbeddingProvider, storage: StoragePort, *, model_name: str) -> None:
         self.provider = provider
         self.storage = storage
         self.model_name = model_name

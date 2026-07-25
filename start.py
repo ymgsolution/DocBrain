@@ -15,7 +15,10 @@ What it does, in order:
      later.
   4. Applies database migrations.
   5. First run only: seeds demo data.
-  6. Starts the API, the AI background worker, and the frontend dev server
+  6. Frees ports 8000/3000 if anything's still listening on them — almost
+     always a leftover process from a previous run that didn't shut down
+     cleanly — instead of failing with "address already in use".
+  7. Starts the API, the AI background worker, and the frontend dev server
      together, and opens your browser once they're up.
 
 Usage:  python3 start.py   (or: ./start.sh / start.bat)
@@ -25,6 +28,7 @@ Stop:   Ctrl+C — shuts down all three processes together.
 import platform
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -36,6 +40,7 @@ ROOT = Path(__file__).resolve().parent
 BACKEND = ROOT / "backend"
 FRONTEND = ROOT / "frontend"
 IS_WINDOWS = platform.system() == "Windows"
+APP_PORTS = {8000: "backend API", 3000: "frontend"}
 
 
 def npm_cmd() -> str:
@@ -84,6 +89,52 @@ def check_libmagic() -> None:
     else:
         print("  Fix:  sudo apt update && sudo apt install libmagic1 libmagic-dev")
     die("Install the above, then re-run this script.")
+
+
+def _port_in_use(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def _pids_on_port(port: int) -> list[str]:
+    if IS_WINDOWS:
+        result = subprocess.run(["netstat", "-ano"], capture_output=True, text=True)
+        pids = set()
+        for line in result.stdout.splitlines():
+            if f":{port} " in line and "LISTENING" in line:
+                pids.add(line.split()[-1])
+        return list(pids)
+
+    result = subprocess.run(["lsof", "-ti", f"tcp:{port}"], capture_output=True, text=True)
+    return [pid for pid in result.stdout.split() if pid]
+
+
+def free_ports() -> None:
+    """Kills whatever's already listening on the ports this app needs —
+    almost always a leftover process from a previous run that didn't shut
+    down cleanly (a crash, a closed terminal, Ctrl+C not fully finishing) —
+    so a stale process never blocks a fresh run with 'address already in
+    use'. Best-effort: if the platform tool to find/kill it isn't available
+    (e.g. no lsof), this just leaves the original error to surface later
+    with its own clear message, rather than failing here."""
+    for port, label in APP_PORTS.items():
+        if not _port_in_use(port):
+            continue
+        print(f"▸ Port {port} ({label}) is already in use — stopping the existing process ...")
+        try:
+            pids = _pids_on_port(port)
+        except FileNotFoundError:
+            print(f"  Couldn't check port {port} automatically (missing 'netstat'/'lsof') — continuing anyway.")
+            continue
+        for pid in pids:
+            subprocess.run(
+                ["taskkill", "/F", "/PID", pid] if IS_WINDOWS else ["kill", "-9", pid],
+                capture_output=True,
+            )
+        time.sleep(0.5)
+        if _port_in_use(port):
+            print(f"  Couldn't free port {port} automatically — you may need to close it yourself.")
 
 
 def run(cmd: list[str], cwd: Path, label: str) -> None:
@@ -173,6 +224,8 @@ def main() -> None:
             BACKEND,
             "Writing demo file content",
         )
+
+    free_ports()
 
     print("\n" + "=" * 60)
     print("Starting DocBrain (Ctrl+C to stop everything)")

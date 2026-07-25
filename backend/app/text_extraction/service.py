@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import AiJob, DocumentVersion
 from app.db.models.enums import AiJobType, ExtractionStatus
-from app.storage.local_adapter import LocalFileSystemStorage
+from app.storage.port import StoragePort
 from app.text_extraction.registry import get_extractor
 from app.text_extraction.repository import DocumentExtractedTextRepository
 from app.utils.file_validation import get_extension
@@ -17,7 +17,7 @@ class TextExtractionService:
     the `ai_jobs.worker.JobHandler` signature exactly, so it's registered
     directly as `{AiJobType.EXTRACT: TextExtractionService(storage).process_job}`."""
 
-    def __init__(self, storage: LocalFileSystemStorage) -> None:
+    def __init__(self, storage: StoragePort) -> None:
         self.storage = storage
 
     def process_job(self, db: Session, job: AiJob) -> None:

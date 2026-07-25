@@ -19,6 +19,17 @@ class Settings(BaseSettings):
     max_upload_size_mb: int = 25
     allowed_extensions: str = "pdf,doc,docx,xls,xlsx,ppt,pptx,txt,md,csv,png,jpg"
 
+    # "local" (default — LocalFileSystemStorage, backend/uploads/) or
+    # "supabase" (SupabaseStorageAdapter, S3-compatible). See app/storage/
+    # factory.py. Local stays the default so dev/test never needs live
+    # Supabase Storage credentials.
+    storage_provider: str = "local"
+    supabase_storage_endpoint: str = ""
+    supabase_storage_region: str = ""
+    supabase_storage_bucket: str = ""
+    supabase_storage_access_key_id: str = ""
+    supabase_storage_secret_access_key: str = ""
+
     cors_origins: str = "http://localhost:3000"
 
     # AI feature track — empty gemini_api_key means the metadata-generation

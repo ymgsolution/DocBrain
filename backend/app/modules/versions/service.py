@@ -8,7 +8,8 @@ from app.db.models import ActivityEvent, AiJob, Document, DocumentVersion, User
 from app.db.models.enums import ActivityEventType, AiJobType, DocumentStatus, UserRole
 from app.modules.versions.repository import VersionRepository
 from app.storage.checksum import sha256_of_stream
-from app.storage.local_adapter import LocalFileSystemStorage
+from app.storage.factory import get_storage
+from app.storage.port import StoragePort
 from app.utils.file_validation import (
     sniff_mime_type,
     validate_content_matches_extension,
@@ -24,7 +25,7 @@ def _assert_can_upload_version(document: Document, user: User) -> None:
 
 
 class VersionService:
-    def __init__(self, repository: VersionRepository, storage: LocalFileSystemStorage) -> None:
+    def __init__(self, repository: VersionRepository, storage: StoragePort) -> None:
         self.repository = repository
         self.storage = storage
 
@@ -35,8 +36,12 @@ class VersionService:
         version = self.repository.get(document.id, version_number)
         if version is None:
             raise NotFoundError("That version doesn't exist.")
+        # Resolved by the version's own stamped provider, not self.storage
+        # (today's configured default) — a version uploaded before a
+        # STORAGE_PROVIDER flip still lives where it was actually written.
+        storage = get_storage(version.storage_provider)
         try:
-            stream = self.storage.open_for_read(version.storage_path)
+            stream = storage.open_for_read(version.storage_path)
         except FileNotFoundError as exc:
             raise GoneError("The file for this version is missing from storage.") from exc
         return version, stream
@@ -70,6 +75,7 @@ class VersionService:
                 document_id=document.id,
                 version_number=version_number,
                 storage_path=storage_path,
+                storage_provider=self.storage.provider_name,
                 original_filename=file.filename or "upload",
                 mime_type=mime_type,
                 size_bytes=size_bytes,
@@ -117,12 +123,27 @@ class VersionService:
 
         new_version_number = self.repository.next_version_number(document_id)
         new_storage_path = self.storage.build_storage_path(document.id, new_version_number, source.original_filename)
-        self.storage.copy(source.storage_path, new_storage_path)
+        if source.storage_provider == self.storage.provider_name:
+            # Fast path: source and destination are the same adapter, so a
+            # native server-side copy applies (no bytes round-trip through
+            # this process).
+            self.storage.copy(source.storage_path, new_storage_path)
+        else:
+            # Source lives on a different provider than today's default
+            # (e.g. restoring a version uploaded before a STORAGE_PROVIDER
+            # flip) — copy() only works within one adapter, so fall back to
+            # reading the source's bytes and writing them into the current
+            # provider via the normal save_temp/commit path.
+            source_storage = get_storage(source.storage_provider)
+            with source_storage.open_for_read(source.storage_path) as stream:
+                temp_path = self.storage.save_temp(stream)
+            self.storage.commit(temp_path, new_storage_path)
 
         version = DocumentVersion(
             document_id=document.id,
             version_number=new_version_number,
             storage_path=new_storage_path,
+            storage_provider=self.storage.provider_name,
             original_filename=source.original_filename,
             mime_type=source.mime_type,
             size_bytes=source.size_bytes,

@@ -14,7 +14,7 @@ from app.modules.versions.repository import VersionRepository
 from app.modules.versions.service import VersionService
 from app.schemas.mappers import to_version_detail
 from app.schemas.version import VersionDetail, VersionRestoreRequest
-from app.storage.local_adapter import LocalFileSystemStorage
+from app.storage.factory import get_storage
 
 router = APIRouter(prefix="/api/v1/documents/{document_id}/versions", tags=["versions"])
 
@@ -22,11 +22,11 @@ INLINE_PREVIEWABLE_MIME_TYPES = {"application/pdf", "text/plain"}
 
 
 def get_version_service(db: Session = Depends(get_db_session)) -> VersionService:
-    return VersionService(VersionRepository(db), LocalFileSystemStorage())
+    return VersionService(VersionRepository(db), get_storage())
 
 
 def get_document_service(db: Session = Depends(get_db_session)) -> DocumentService:
-    return DocumentService(DocumentRepository(db), LocalFileSystemStorage())
+    return DocumentService(DocumentRepository(db), get_storage())
 
 
 def _resolve_disposition(requested: str, mime_type: str) -> str:

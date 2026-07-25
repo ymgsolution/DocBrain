@@ -8,6 +8,8 @@ from app.utils.slugify import slugify_filename
 
 
 class LocalFileSystemStorage:
+    provider_name = "local"
+
     def __init__(self, root: str | None = None) -> None:
         settings = get_settings()
         self.root = Path(root or settings.storage_root).resolve()

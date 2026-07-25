@@ -16,7 +16,7 @@ from app.ai_jobs.worker import JobHandler, run_forever
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.models.enums import AiJobType
-from app.storage.local_adapter import LocalFileSystemStorage
+from app.storage.factory import get_storage
 from app.text_extraction.service import TextExtractionService
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 if __name__ == "__main__":
     configure_logging()
     settings = get_settings()
-    storage = LocalFileSystemStorage()
+    storage = get_storage()
 
     extraction_service = TextExtractionService(storage)
     handlers: dict[AiJobType, JobHandler] = {AiJobType.EXTRACT: extraction_service.process_job}

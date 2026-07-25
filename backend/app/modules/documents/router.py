@@ -15,13 +15,13 @@ from app.modules.documents.service import DocumentService
 from app.schemas.document import DocumentCreateMetadata, DocumentDetail, DocumentUpdate, PagedDocuments, SimilarDocument
 from app.schemas.mappers import to_document_detail, to_document_summary, to_similar_document, to_trashed_document_item
 from app.schemas.trash import PagedTrash
-from app.storage.local_adapter import LocalFileSystemStorage
+from app.storage.factory import get_storage
 
 router = APIRouter(prefix="/api/v1/documents", tags=["documents"])
 
 
 def get_document_service(db: Session = Depends(get_db_session)) -> DocumentService:
-    return DocumentService(DocumentRepository(db), LocalFileSystemStorage())
+    return DocumentService(DocumentRepository(db), get_storage())
 
 
 def get_similarity_service(db: Session = Depends(get_db_session)) -> SimilarityService:

@@ -7,6 +7,10 @@ class StoragePort(Protocol):
     """Abstracts where bytes live, so LocalFileSystemStorage can be swapped for
     an S3/MinIO adapter later without touching any call site (§5.3, §20)."""
 
+    # Stamped onto DocumentVersion.storage_provider on write, and used to
+    # pick the right adapter back on read — see app/storage/factory.py.
+    provider_name: str
+
     def save_temp(self, stream: BinaryIO) -> Path: ...
 
     def build_storage_path(self, document_id: uuid.UUID, version_number: int, filename: str) -> str: ...

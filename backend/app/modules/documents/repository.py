@@ -159,9 +159,11 @@ class DocumentRepository:
     def get_category(self, category_id: uuid.UUID) -> Category | None:
         return self.db.get(Category, category_id)
 
-    def list_version_storage_paths(self, document_id: uuid.UUID) -> list[str]:
-        stmt = select(DocumentVersion.storage_path).where(DocumentVersion.document_id == document_id)
-        return list(self.db.scalars(stmt))
+    def list_version_storage_paths(self, document_id: uuid.UUID) -> list[tuple[str, str]]:
+        stmt = select(DocumentVersion.storage_path, DocumentVersion.storage_provider).where(
+            DocumentVersion.document_id == document_id
+        )
+        return [(path, provider) for path, provider in self.db.execute(stmt)]
 
     def list_extracted_text_paths(self, document_id: uuid.UUID) -> list[str]:
         """AI feature track — the `.txt` siblings live outside the DB cascade
