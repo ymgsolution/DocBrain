@@ -61,8 +61,11 @@ class TextExtractionService:
         # AI feature track (Phase 2): chained rather than enqueued unconditionally
         # at upload time like EXTRACT — no point paying for a model call against
         # a document with no usable text yet, and this only fires once text
-        # genuinely exists.
+        # genuinely exists. GENERATE_METADATA and GENERATE_EMBEDDING are enqueued
+        # side by side, independently of each other — neither depends on the
+        # other's outcome or completion order (Similar Document Detection track).
         if result.char_count > 0:
             db.add(AiJob(job_type=AiJobType.GENERATE_METADATA, document_version_id=version.id))
+            db.add(AiJob(job_type=AiJobType.GENERATE_EMBEDDING, document_version_id=version.id))
 
         db.commit()

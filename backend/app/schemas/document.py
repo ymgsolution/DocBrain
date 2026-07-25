@@ -43,6 +43,16 @@ class AiSuggestion(CamelModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class SimilarDocument(DocumentSummary):
+    """Similar Document Detection track — a document, plus how similar it is
+    to whichever document was queried (cosine similarity, 0..1). A separate
+    endpoint/schema rather than a DocumentDetail field: unlike ai_suggestion
+    (a passive read off the current row), this is an active nearest-neighbor
+    query against every other document's embedding."""
+
+    similarity: float
+
+
 class DocumentDetail(DocumentSummary):
     tags: list[TagSummary]
     last_reviewed_at: datetime | None

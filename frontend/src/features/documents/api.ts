@@ -1,6 +1,6 @@
 import { apiClient, ApiError, BFF_BASE } from "@/lib/api-client";
 import type { ApiErrorBody } from "@/types/api";
-import type { DocumentDetail, VersionDetail } from "@/types/document";
+import type { DocumentDetail, SimilarDocument, VersionDetail } from "@/types/document";
 import type { DocumentCreatePayload, DocumentListFilters, DocumentUpdatePayload, PagedDocuments } from "./types";
 
 export const documentsApi = {
@@ -34,6 +34,10 @@ export const documentsApi = {
 
   listVersions(id: string): Promise<VersionDetail[]> {
     return apiClient.get<VersionDetail[]>(`/documents/${id}/versions`);
+  },
+
+  listSimilar(id: string): Promise<SimilarDocument[]> {
+    return apiClient.get<SimilarDocument[]>(`/documents/${id}/similar`);
   },
 
   restoreVersion(id: string, versionNumber: number): Promise<VersionDetail> {

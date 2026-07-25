@@ -4,14 +4,16 @@ from datetime import date
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy.orm import Session
 
+from app.ai.embedding_repository import DocumentVectorEmbeddingRepository
+from app.ai.similarity_service import SimilarityService
 from app.core.dependencies import get_current_user
 from app.db.models import User
 from app.db.models.enums import DocumentStatus
 from app.db.session import get_db_session
 from app.modules.documents.repository import DocumentRepository
 from app.modules.documents.service import DocumentService
-from app.schemas.document import DocumentCreateMetadata, DocumentDetail, DocumentUpdate, PagedDocuments
-from app.schemas.mappers import to_document_detail, to_document_summary, to_trashed_document_item
+from app.schemas.document import DocumentCreateMetadata, DocumentDetail, DocumentUpdate, PagedDocuments, SimilarDocument
+from app.schemas.mappers import to_document_detail, to_document_summary, to_similar_document, to_trashed_document_item
 from app.schemas.trash import PagedTrash
 from app.storage.local_adapter import LocalFileSystemStorage
 
@@ -20,6 +22,10 @@ router = APIRouter(prefix="/api/v1/documents", tags=["documents"])
 
 def get_document_service(db: Session = Depends(get_db_session)) -> DocumentService:
     return DocumentService(DocumentRepository(db), LocalFileSystemStorage())
+
+
+def get_similarity_service(db: Session = Depends(get_db_session)) -> SimilarityService:
+    return SimilarityService(DocumentVectorEmbeddingRepository(db), DocumentRepository(db))
 
 
 @router.get("", response_model=PagedDocuments)
@@ -111,6 +117,19 @@ def get_document(
     document = service.get_detail(document_id)
     service.touch_last_accessed(document)
     return to_document_detail(document)
+
+
+@router.get("/{document_id}/similar", response_model=list[SimilarDocument])
+def get_similar_documents(
+    document_id: uuid.UUID,
+    limit: int = Query(default=5, ge=1, le=20),
+    service: DocumentService = Depends(get_document_service),
+    similarity: SimilarityService = Depends(get_similarity_service),
+    current_user: User = Depends(get_current_user),
+) -> list[SimilarDocument]:
+    service.get_detail(document_id)  # 404s via NotFoundError if missing/inactive, same as GET /documents/{id}
+    results = similarity.find_similar_documents(document_id, limit=limit)
+    return [to_similar_document(document, score) for document, score in results]
 
 
 @router.patch("/{document_id}", response_model=DocumentDetail)

@@ -38,6 +38,17 @@ class DocumentRepository:
         stmt = self._detail_query().where(Document.id == document_id)
         return self.db.scalar(stmt)
 
+    def list_by_ids(self, document_ids: list[uuid.UUID]) -> list[Document]:
+        """Similar Document Detection track — hydrates the Document rows a
+        SimilarityService query already ranked by id, with the same
+        eager-loading (_base_query) a listing endpoint gets. Order is not
+        guaranteed to match document_ids; callers that need ranked order
+        (e.g. by similarity score) re-sort using the input list themselves."""
+        if not document_ids:
+            return []
+        stmt = self._base_query().where(Document.id.in_(document_ids))
+        return list(self.db.scalars(stmt))
+
     def list_documents(
         self,
         *,

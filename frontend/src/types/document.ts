@@ -48,6 +48,12 @@ export interface AiSuggestion {
   tags: string[];
 }
 
+// Similar Document Detection track — a document plus how similar it is
+// (cosine similarity, 0..1) to whichever document was queried.
+export interface SimilarDocument extends DocumentSummary {
+  similarity: number;
+}
+
 export interface DocumentDetail extends DocumentSummary {
   tags: TagSummary[];
   lastReviewedAt: string | null;

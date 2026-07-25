@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from app.db.models.ai_document_analysis import AiDocumentAnalysis
     from app.db.models.document import Document
     from app.db.models.document_extracted_text import DocumentExtractedText
+    from app.db.models.document_vector_embedding import DocumentVectorEmbedding
     from app.db.models.user import User
 
 
@@ -67,6 +68,11 @@ class DocumentVersion(Base):
     # relationship isn't eager-loaded yet, but declaring it up front avoids
     # re-discovering the hard-delete 500 the moment something does eager-load it.
     analysis: Mapped["AiDocumentAnalysis | None"] = relationship(
+        back_populates="document_version", uselist=False, passive_deletes=True
+    )
+    # Similar Document Detection track — same passive_deletes=True reasoning
+    # as extracted_text/analysis above.
+    embedding: Mapped["DocumentVectorEmbedding | None"] = relationship(
         back_populates="document_version", uselist=False, passive_deletes=True
     )
 

@@ -3,7 +3,14 @@ import uuid
 from app.db.models import Document, DocumentVersion
 from app.db.models.enums import AiAnalysisStatus
 from app.schemas.auth import UserSummary
-from app.schemas.document import AiSuggestion, CategorySummary, DocumentDetail, DocumentSummary, TagSummary
+from app.schemas.document import (
+    AiSuggestion,
+    CategorySummary,
+    DocumentDetail,
+    DocumentSummary,
+    SimilarDocument,
+    TagSummary,
+)
 from app.schemas.trash import TrashedDocumentItem
 from app.schemas.version import VersionDetail, VersionSummary
 
@@ -81,6 +88,10 @@ def to_document_detail(document: Document) -> DocumentDetail:
         ),
         ai_suggestion=_to_ai_suggestion(document),
     )
+
+
+def to_similar_document(document: Document, similarity: float) -> SimilarDocument:
+    return SimilarDocument(**to_document_summary(document).model_dump(), similarity=similarity)
 
 
 def to_trashed_document_item(document: Document) -> TrashedDocumentItem:

@@ -46,6 +46,7 @@ class ExtractionStatus(str, enum.Enum):
 class AiJobType(str, enum.Enum):
     EXTRACT = "EXTRACT"
     GENERATE_METADATA = "GENERATE_METADATA"
+    GENERATE_EMBEDDING = "GENERATE_EMBEDDING"
 
 
 class AiJobStatus(str, enum.Enum):

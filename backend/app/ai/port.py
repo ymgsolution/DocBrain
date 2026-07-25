@@ -42,11 +42,13 @@ class AIResponse:
 class AIProvider(Protocol):
     """Mirrors StoragePort's shape: one Protocol, swappable concrete adapters,
     zero change to callers when the provider changes. generate_structured is
-    the only method this milestone implements — generate_text and
-    generate_embedding are declared now so the metadata-generation service
-    (and future summary/chat/embedding services) never have to depend on a
-    provider-specific interface, even though only Gemini + structured output
-    exists today."""
+    the only method this milestone implements — generate_text is declared now
+    so the metadata-generation service (and future summary/chat services)
+    never have to depend on a provider-specific interface, even though only
+    Gemini + structured output exists today. Embeddings are a separate
+    EmbeddingProvider (app/ai/embedding_port.py) — different call shape
+    (text-in/vector-out, no schema) and different tuning knobs
+    (task_type/output_dimensionality) that don't belong on this Protocol."""
 
     def generate_structured(
         self,
@@ -58,5 +60,3 @@ class AIProvider(Protocol):
     ) -> AIResponse: ...
 
     def generate_text(self, *, system_prompt: str, user_prompt: str, timeout_seconds: float) -> str: ...
-
-    def generate_embedding(self, *, text: str) -> list[float]: ...

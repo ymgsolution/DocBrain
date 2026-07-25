@@ -30,6 +30,20 @@ class Settings(BaseSettings):
     ai_max_retries: int = 3
     ai_max_extracted_text_chars: int = 20_000
 
+    # Similar Document Detection track — same gemini_api_key gate as metadata
+    # generation (app/ai_jobs/main.py). A separate, smaller char limit than
+    # ai_max_extracted_text_chars: embedding models have a much lower input
+    # token ceiling than generation models.
+    gemini_embedding_model: str = "gemini-embedding-001"
+    ai_embedding_dimensions: int = 768
+    ai_embedding_max_chars: int = 8_000
+    # Below this cosine similarity, a "similar" document is more likely noise
+    # than a genuinely related document (e.g. two documents that just happen
+    # to share generic corporate boilerplate) — filtered out rather than
+    # shown, same "show nothing rather than a weak/misleading result"
+    # philosophy as the rest of this feature.
+    similarity_min_score: float = 0.80
+
 
 @lru_cache
 def get_settings() -> Settings:

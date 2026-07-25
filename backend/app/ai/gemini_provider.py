@@ -76,9 +76,6 @@ class GeminiProvider:
     def generate_text(self, *, system_prompt: str, user_prompt: str, timeout_seconds: float) -> str:
         raise NotImplementedError("generate_text is not implemented in this milestone — structured output only.")
 
-    def generate_embedding(self, *, text: str) -> list[float]:
-        raise NotImplementedError("generate_embedding is not implemented in this milestone.")
-
     def _generate_with_retry(self, *, contents: str, config: types.GenerateContentConfig) -> tuple[Any, int]:
         """Retries transient transport failures (network/5xx) only —
         schema-validation failures happen after this returns and are never
