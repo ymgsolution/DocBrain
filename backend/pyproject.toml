@@ -38,3 +38,9 @@ dev = [
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+testpaths = ["tests"]
+filterwarnings = [
+    # Starlette's TestClient nudges toward httpx2; httpx is already a dev
+    # dependency here and works fine, so this is noise on every run.
+    "ignore:Using .httpx. with .starlette.testclient. is deprecated",
+]

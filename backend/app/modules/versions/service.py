@@ -29,6 +29,21 @@ class VersionService:
         self.repository = repository
         self.storage = storage
 
+    def _storage_for(self, provider: str) -> StoragePort:
+        """The adapter that actually holds a given version's bytes.
+
+        Prefers the injected `self.storage` whenever it already speaks that
+        provider — which is the overwhelmingly common case, since it *is*
+        the configured default. Only a version written under a different
+        provider (i.e. before a STORAGE_PROVIDER change) falls through to
+        the factory. Going straight to the factory unconditionally would
+        quietly ignore the injected dependency, making it impossible to
+        point this service at a different adapter (a test's temp directory,
+        say) and have reads honour it."""
+        if provider == self.storage.provider_name:
+            return self.storage
+        return get_storage(provider)
+
     def list_versions(self, document: Document) -> list[DocumentVersion]:
         return self.repository.list_for_document(document.id)
 
@@ -39,7 +54,7 @@ class VersionService:
         # Resolved by the version's own stamped provider, not self.storage
         # (today's configured default) — a version uploaded before a
         # STORAGE_PROVIDER flip still lives where it was actually written.
-        storage = get_storage(version.storage_provider)
+        storage = self._storage_for(version.storage_provider)
         try:
             stream = storage.open_for_read(version.storage_path)
         except FileNotFoundError as exc:
@@ -134,7 +149,7 @@ class VersionService:
             # flip) — copy() only works within one adapter, so fall back to
             # reading the source's bytes and writing them into the current
             # provider via the normal save_temp/commit path.
-            source_storage = get_storage(source.storage_provider)
+            source_storage = self._storage_for(source.storage_provider)
             with source_storage.open_for_read(source.storage_path) as stream:
                 temp_path = self.storage.save_temp(stream)
             self.storage.commit(temp_path, new_storage_path)

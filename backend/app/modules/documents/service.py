@@ -41,6 +41,14 @@ class DocumentService:
         self.repository = repository
         self.storage = storage
 
+    def _storage_for(self, provider: str) -> StoragePort:
+        """Mirrors VersionService._storage_for — prefer the injected adapter
+        when it already speaks this version's provider, fall back to the
+        factory only for a genuinely different one (see its docstring)."""
+        if provider == self.storage.provider_name:
+            return self.storage
+        return get_storage(provider)
+
     def create_document(
         self,
         *,
@@ -269,6 +277,6 @@ class DocumentService:
         self.repository.db.commit()
 
         for path, provider in storage_paths:
-            get_storage(provider).delete(path)
+            self._storage_for(provider).delete(path)
         for path in extracted_text_paths:
             self.storage.delete(path)

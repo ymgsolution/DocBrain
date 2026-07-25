@@ -190,6 +190,19 @@ DocBrain/
         └── components/          # shared UI components
 ```
 
+## Tests
+
+```bash
+cd backend && uv run pytest
+```
+
+The API tests run against the same Postgres in `DATABASE_URL`, but each test
+runs inside a transaction that is **rolled back** when it finishes — so they
+exercise the real schema (full-text search triggers, cascades, enums) while
+leaving the database exactly as they found it. No separate test database or
+Docker setup is needed. Tests are skipped automatically if `DATABASE_URL`
+isn't configured.
+
 ## Notes
 
 - AI features run on **Google Gemini**. Without `GEMINI_API_KEY` set, everything else in the app works normally — the AI worker simply skips metadata generation and logs a warning.
