@@ -8,8 +8,44 @@ import boto3
 from botocore.client import Config
 from botocore.exceptions import ClientError
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.utils.slugify import slugify_filename
+
+
+class SupabaseStorageConfigError(RuntimeError):
+    """STORAGE_PROVIDER=supabase but the credentials/endpoint aren't usable.
+    Raised at construction so it surfaces as one readable line at startup
+    rather than deep inside boto3 on the first upload."""
+
+
+def _validate_settings(settings: Settings) -> None:
+    """Fails fast, and in plain English.
+
+    Without this, a placeholder endpoint left in (e.g. the literal
+    "https://[project-ref].supabase.co/...") reaches urllib, which reads the
+    bracketed hostname as an IPv6 literal and raises `ValueError: Invalid
+    IPv6 URL` — a message that points nowhere near the actual mistake. Hit
+    for real while deploying the worker to Railway."""
+    required = {
+        "SUPABASE_STORAGE_ENDPOINT": settings.supabase_storage_endpoint,
+        "SUPABASE_STORAGE_REGION": settings.supabase_storage_region,
+        "SUPABASE_STORAGE_BUCKET": settings.supabase_storage_bucket,
+        "SUPABASE_STORAGE_ACCESS_KEY_ID": settings.supabase_storage_access_key_id,
+        "SUPABASE_STORAGE_SECRET_ACCESS_KEY": settings.supabase_storage_secret_access_key,
+    }
+    missing = [name for name, value in required.items() if not value.strip()]
+    if missing:
+        raise SupabaseStorageConfigError(
+            f"STORAGE_PROVIDER=supabase but these are not set: {', '.join(missing)}. "
+            "Set them, or use STORAGE_PROVIDER=local to store files on disk instead."
+        )
+
+    placeholders = [name for name, value in required.items() if "[" in value or "]" in value]
+    if placeholders:
+        raise SupabaseStorageConfigError(
+            f"These still contain a placeholder from .env.example: {', '.join(placeholders)}. "
+            "Replace the bracketed part with your real Supabase project values."
+        )
 
 
 class SupabaseStorageAdapter:
@@ -28,6 +64,7 @@ class SupabaseStorageAdapter:
 
     def __init__(self) -> None:
         settings = get_settings()
+        _validate_settings(settings)
         self._bucket = settings.supabase_storage_bucket
         self._client = boto3.client(
             "s3",
