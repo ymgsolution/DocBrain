@@ -1,3 +1,10 @@
+// Either a preset number of days, or an exact moment (ISO, UTC). The API
+// prefers expiresAt when both are present.
+export interface ShareLinkCreatePayload {
+  expiresInDays?: number;
+  expiresAt?: string;
+}
+
 export interface ShareLinkSummary {
   id: string;
   versionNumber: number;

@@ -285,3 +285,79 @@ def test_a_reviewer_may_share_a_document_they_do_not_own(
     )
 
     assert response.status_code == 201
+
+
+def test_a_custom_expiry_moment_is_honoured(client: TestClient, auth, employee: User, upload):
+    """"Expires Friday at 5pm" rather than a whole number of days."""
+    headers = auth(employee)
+    document = upload(headers, title="Contract For Client")
+    moment = (datetime.now(timezone.utc) + timedelta(days=3, hours=5)).replace(microsecond=0)
+
+    response = client.post(
+        f"/api/v1/documents/{document['id']}/shares",
+        headers=headers,
+        json={"expiresAt": moment.isoformat()},
+    )
+
+    assert response.status_code == 201, response.text
+    assert datetime.fromisoformat(response.json()["expiresAt"].replace("Z", "+00:00")) == moment
+
+
+def test_a_custom_expiry_beats_the_day_preset_when_both_are_sent(
+    client: TestClient, auth, employee: User, upload
+):
+    headers = auth(employee)
+    document = upload(headers, title="Contract For Client")
+    moment = (datetime.now(timezone.utc) + timedelta(days=2)).replace(microsecond=0)
+
+    response = client.post(
+        f"/api/v1/documents/{document['id']}/shares",
+        headers=headers,
+        json={"expiresInDays": 90, "expiresAt": moment.isoformat()},
+    )
+
+    assert response.status_code == 201
+    assert datetime.fromisoformat(response.json()["expiresAt"].replace("Z", "+00:00")) == moment
+
+
+def test_a_custom_expiry_in_the_past_is_rejected(client: TestClient, auth, employee: User, upload):
+    """A link that's already dead on arrival reads as a bug, not a choice."""
+    headers = auth(employee)
+    document = upload(headers, title="Contract For Client")
+    past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+
+    response = client.post(
+        f"/api/v1/documents/{document['id']}/shares", headers=headers, json={"expiresAt": past}
+    )
+
+    assert response.status_code == 422
+
+
+def test_a_custom_expiry_cannot_exceed_the_ceiling(client: TestClient, auth, employee: User, upload):
+    """Custom must not be a way around the limit the presets enforce."""
+    headers = auth(employee)
+    document = upload(headers, title="Contract For Client")
+    too_far = (datetime.now(timezone.utc) + timedelta(days=365)).isoformat()
+
+    response = client.post(
+        f"/api/v1/documents/{document['id']}/shares", headers=headers, json={"expiresAt": too_far}
+    )
+
+    assert response.status_code == 422
+
+
+def test_a_naive_custom_expiry_is_read_as_utc(client: TestClient, auth, employee: User, upload):
+    """A datetime-local value arrives without a timezone. Treating it as UTC
+    is a deliberate choice — guessing the server's local zone would shift the
+    expiry by hours depending on where the API happens to be deployed."""
+    headers = auth(employee)
+    document = upload(headers, title="Contract For Client")
+    naive = (datetime.now(timezone.utc) + timedelta(days=2)).replace(microsecond=0, tzinfo=None)
+
+    response = client.post(
+        f"/api/v1/documents/{document['id']}/shares", headers=headers, json={"expiresAt": naive.isoformat()}
+    )
+
+    assert response.status_code == 201
+    returned = datetime.fromisoformat(response.json()["expiresAt"].replace("Z", "+00:00"))
+    assert returned == naive.replace(tzinfo=timezone.utc)

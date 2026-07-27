@@ -49,7 +49,10 @@ def create_share_link(
     current_user: User = Depends(get_current_user),
 ) -> ShareLinkCreated:
     link, token = service.create_link(
-        document_id, expires_in_days=payload.expires_in_days, current_user=current_user
+        document_id,
+        expires_in_days=payload.expires_in_days,
+        expires_at=payload.expires_at,
+        current_user=current_user,
     )
     base = get_settings().public_app_url.rstrip("/")
     return ShareLinkCreated(

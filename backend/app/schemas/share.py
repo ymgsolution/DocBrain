@@ -9,6 +9,11 @@ from app.modules.shares.service import DEFAULT_EXPIRY_DAYS, MAX_EXPIRY_DAYS
 
 class ShareLinkCreate(CamelModel):
     expires_in_days: int = Field(default=DEFAULT_EXPIRY_DAYS, ge=1, le=MAX_EXPIRY_DAYS)
+    # An exact moment, for "expires Friday at 5pm" rather than a whole number
+    # of days. Optional and takes precedence when set; the preset path is
+    # untouched when it isn't. Bounds are enforced in the service, not here,
+    # so both routes are checked against the same ceiling in one place.
+    expires_at: datetime | None = None
 
 
 class ShareLinkSummary(CamelModel):

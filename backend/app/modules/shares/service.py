@@ -50,6 +50,38 @@ class ShareService:
         self.documents = documents
         self.storage = storage
 
+    @staticmethod
+    def _resolve_expiry(expires_in_days: int, expires_at: datetime | None) -> datetime:
+        now = datetime.now(timezone.utc)
+        ceiling = now + timedelta(days=MAX_EXPIRY_DAYS)
+
+        if expires_at is not None:
+            # A datetime-local input has no timezone; treat a naive value as
+            # UTC rather than guessing the server's local zone, which would
+            # silently shift the expiry by hours depending on where the API
+            # happens to be deployed.
+            moment = expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=timezone.utc)
+            # A minute of headroom: a link that expires the instant it's
+            # created is never what someone meant, and reads as a bug.
+            if moment <= now + timedelta(minutes=1):
+                raise ValidationError(
+                    "Pick an expiry at least a minute in the future.",
+                    fields=[{"field": "expiresAt", "message": "Must be in the future."}],
+                )
+            if moment > ceiling:
+                raise ValidationError(
+                    f"A share link can't last longer than {MAX_EXPIRY_DAYS} days.",
+                    fields=[{"field": "expiresAt", "message": f"Choose a date within {MAX_EXPIRY_DAYS} days."}],
+                )
+            return moment
+
+        if expires_in_days < 1 or expires_in_days > MAX_EXPIRY_DAYS:
+            raise ValidationError(
+                f"A share link must expire between 1 and {MAX_EXPIRY_DAYS} days from now.",
+                fields=[{"field": "expiresInDays", "message": f"Choose 1-{MAX_EXPIRY_DAYS} days."}],
+            )
+        return now + timedelta(days=expires_in_days)
+
     def _storage_for(self, provider: str) -> StoragePort:
         """Mirrors VersionService._storage_for — prefer the injected adapter
         when it already speaks this version's provider, fall back to the
@@ -59,16 +91,22 @@ class ShareService:
         return get_storage(provider)
 
     def create_link(
-        self, document_id: uuid.UUID, *, expires_in_days: int, current_user: User
+        self,
+        document_id: uuid.UUID,
+        *,
+        expires_in_days: int,
+        expires_at: datetime | None = None,
+        current_user: User,
     ) -> tuple[ShareLink, str]:
         """Returns the row **and** the raw token — the only moment the token
         exists in readable form. It is never recoverable afterwards, so the
-        caller must return it to the user now or not at all."""
-        if expires_in_days < 1 or expires_in_days > MAX_EXPIRY_DAYS:
-            raise ValidationError(
-                f"A share link must expire between 1 and {MAX_EXPIRY_DAYS} days from now.",
-                fields=[{"field": "expiresInDays", "message": f"Choose 1-{MAX_EXPIRY_DAYS} days."}],
-            )
+        caller must return it to the user now or not at all.
+
+        `expires_at` (an exact moment, chosen by the user) wins when given;
+        otherwise `expires_in_days` is counted from now. Both routes are
+        clamped by the same MAX_EXPIRY_DAYS ceiling, so "custom" can't be
+        used to sidestep the limit the presets enforce."""
+        expiry = self._resolve_expiry(expires_in_days, expires_at)
 
         document = self.documents.get_active_by_id(document_id)
         if document is None:
@@ -84,7 +122,7 @@ class ShareService:
             # Pinned to whatever is current *now*, so a later upload can't
             # change what an external recipient sees.
             document_version_id=document.current_version_id,
-            expires_at=datetime.now(timezone.utc) + timedelta(days=expires_in_days),
+            expires_at=expiry,
             created_by=current_user.id,
         )
         self.repository.db.add(

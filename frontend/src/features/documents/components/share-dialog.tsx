@@ -20,12 +20,26 @@ import { ApiError } from "@/lib/api-client";
 import { useCreateShareLink, useRevokeShareLink, useShareLinks } from "@/features/shares/hooks";
 import type { ShareLinkCreated } from "@/types/share";
 
+const CUSTOM = "custom";
+
 const EXPIRY_OPTIONS = [
   { value: "1", label: "1 day" },
   { value: "7", label: "7 days" },
   { value: "30", label: "30 days" },
   { value: "90", label: "90 days" },
+  { value: CUSTOM, label: "Custom date & time…" },
 ];
+
+// Matches the backend's MAX_EXPIRY_DAYS. Used only to bound the date picker
+// so the browser stops an out-of-range choice before it's submitted — the
+// real enforcement is server-side, since a native input can be bypassed.
+const MAX_EXPIRY_DAYS = 90;
+
+/** `datetime-local` needs "YYYY-MM-DDTHH:mm" in the *viewer's* timezone. */
+function toLocalInputValue(date: Date): string {
+  const offsetMs = date.getTimezoneOffset() * 60 * 1000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+}
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
@@ -39,6 +53,11 @@ interface ShareDialogProps {
 
 export function ShareDialog({ documentId, open, onOpenChange }: ShareDialogProps) {
   const [expiresInDays, setExpiresInDays] = useState("7");
+  const [customExpiry, setCustomExpiry] = useState("");
+  // Computed when the dialog opens rather than during render: reading the
+  // clock while rendering is impure, and these bounds only need to be
+  // correct as of the moment the picker is shown.
+  const [bounds, setBounds] = useState({ min: "", max: "" });
   // Held in component state, not refetched: the raw token exists only in the
   // create response, so once this dialog closes the URL genuinely cannot be
   // shown again — the owner has to revoke and issue a new one.
@@ -49,8 +68,38 @@ export function ShareDialog({ documentId, open, onOpenChange }: ShareDialogProps
   const createLink = useCreateShareLink(documentId);
   const revokeLink = useRevokeShareLink(documentId);
 
+  const isCustom = expiresInDays === CUSTOM;
+
+  // Base UI's Select can emit null on clear; the expiry is never optional
+  // here, so a null is simply ignored. Bounds are computed here rather than
+  // during render or in an effect — an event handler is the one place it's
+  // both legal to read the clock and guaranteed fresh for the picker that's
+  // about to appear.
+  function handleExpiryChange(value: string | null) {
+    if (!value) return;
+    setExpiresInDays(value);
+    if (value === CUSTOM) {
+      const now = Date.now();
+      setBounds({
+        min: toLocalInputValue(new Date(now + 60 * 1000)),
+        max: toLocalInputValue(new Date(now + MAX_EXPIRY_DAYS * 86400 * 1000)),
+      });
+    }
+  }
+
   function handleCreate() {
-    createLink.mutate(Number(expiresInDays), {
+    if (isCustom && !customExpiry) {
+      toast.error("Pick a date and time first.");
+      return;
+    }
+    // The input gives a local wall-clock time with no zone; toISOString()
+    // converts it to the UTC instant the user actually meant, which is what
+    // the API stores and compares against.
+    const payload = isCustom
+      ? { expiresAt: new Date(customExpiry).toISOString() }
+      : { expiresInDays: Number(expiresInDays) };
+
+    createLink.mutate(payload, {
       onSuccess: (link) => {
         setJustCreated(link);
         setCopied(false);
@@ -122,9 +171,7 @@ export function ShareDialog({ documentId, open, onOpenChange }: ShareDialogProps
                 height, so matching their tops keeps their bottoms level
                 without depending on that hidden box. */}
             <div className="flex items-start gap-2">
-              {/* Base UI's Select can emit null on clear; the expiry is
-                  never optional here, so a null is simply ignored. */}
-              <Select value={expiresInDays} onValueChange={(value) => value && setExpiresInDays(value)}>
+              <Select value={expiresInDays} onValueChange={handleExpiryChange}>
                 <SelectTrigger id="share-expiry" className="w-full flex-1">
                   <SelectValue>{EXPIRY_OPTIONS.find((o) => o.value === expiresInDays)?.label}</SelectValue>
                 </SelectTrigger>
@@ -136,15 +183,52 @@ export function ShareDialog({ documentId, open, onOpenChange }: ShareDialogProps
                   ))}
                 </SelectContent>
               </Select>
-              <Button type="button" className="shrink-0" onClick={handleCreate} disabled={createLink.isPending}>
-                {createLink.isPending ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Link2 className="size-4" />
-                )}
-                Create link
-              </Button>
+              {!isCustom && (
+                <Button
+                  type="button"
+                  className="shrink-0"
+                  onClick={handleCreate}
+                  disabled={createLink.isPending}
+                >
+                  {createLink.isPending ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Link2 className="size-4" />
+                  )}
+                  Create link
+                </Button>
+              )}
             </div>
+
+            {isCustom && (
+              <div className="flex items-start gap-2">
+                <Input
+                  type="datetime-local"
+                  aria-label="Expiry date and time"
+                  className="flex-1"
+                  value={customExpiry}
+                  // Bounds mirror the server's: no past dates, nothing beyond
+                  // the 90-day ceiling. The browser blocks the obvious
+                  // mistakes; the API still rejects anything that slips past.
+                  min={bounds.min}
+                  max={bounds.max}
+                  onChange={(e) => setCustomExpiry(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  className="shrink-0"
+                  onClick={handleCreate}
+                  disabled={createLink.isPending}
+                >
+                  {createLink.isPending ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Link2 className="size-4" />
+                  )}
+                  Create link
+                </Button>
+              </div>
+            )}
           </div>
         )}
 

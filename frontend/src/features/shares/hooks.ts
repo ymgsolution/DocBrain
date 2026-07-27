@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { sharesApi } from "./api";
+import type { ShareLinkCreatePayload } from "@/types/share";
 
 export const sharesKeys = {
   list: (documentId: string) => ["shares", documentId] as const,
@@ -20,7 +21,7 @@ export function useShareLinks(documentId: string, enabled: boolean) {
 export function useCreateShareLink(documentId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (expiresInDays: number) => sharesApi.create(documentId, expiresInDays),
+    mutationFn: (payload: ShareLinkCreatePayload) => sharesApi.create(documentId, payload),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: sharesKeys.list(documentId) }),
   });
 }
