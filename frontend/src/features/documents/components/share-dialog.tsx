@@ -113,13 +113,19 @@ export function ShareDialog({ documentId, open, onOpenChange }: ShareDialogProps
             <p className="text-muted-foreground text-xs">Expires {formatDate(justCreated.expiresAt)}</p>
           </div>
         ) : (
-          <div className="flex items-end gap-2">
-            <div className="flex-1 space-y-2">
-              <Label htmlFor="share-expiry">Expires after</Label>
+          <div className="space-y-2">
+            <Label htmlFor="share-expiry">Expires after</Label>
+            {/* items-start, not items-end/center: Base UI's Select renders an
+                extra element below its visible trigger, so the row is taller
+                than what you can see and aligning by the bottom pushes the
+                button ~8px low. The trigger and the button are the same
+                height, so matching their tops keeps their bottoms level
+                without depending on that hidden box. */}
+            <div className="flex items-start gap-2">
               {/* Base UI's Select can emit null on clear; the expiry is
                   never optional here, so a null is simply ignored. */}
               <Select value={expiresInDays} onValueChange={(value) => value && setExpiresInDays(value)}>
-                <SelectTrigger id="share-expiry" className="w-full">
+                <SelectTrigger id="share-expiry" className="w-full flex-1">
                   <SelectValue>{EXPIRY_OPTIONS.find((o) => o.value === expiresInDays)?.label}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
@@ -130,15 +136,15 @@ export function ShareDialog({ documentId, open, onOpenChange }: ShareDialogProps
                   ))}
                 </SelectContent>
               </Select>
+              <Button type="button" className="shrink-0" onClick={handleCreate} disabled={createLink.isPending}>
+                {createLink.isPending ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Link2 className="size-4" />
+                )}
+                Create link
+              </Button>
             </div>
-            <Button type="button" onClick={handleCreate} disabled={createLink.isPending}>
-              {createLink.isPending ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Link2 className="size-4" />
-              )}
-              Create link
-            </Button>
           </div>
         )}
 
