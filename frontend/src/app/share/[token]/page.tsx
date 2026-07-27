@@ -71,6 +71,18 @@ export default async function SharedDocumentPage({ params }: { params: Promise<{
   }
 
   const contentUrl = `/api/public/shares/${encodeURIComponent(token)}/content`;
+  // #toolbar=0 hides the browser PDF viewer's own toolbar — the one that
+  // carries Download and Print buttons, which otherwise sit right on top of
+  // a document we've told the recipient is view-only. Honoured by Chromium
+  // (Chrome/Edge); Firefox's built-in viewer ignores it and still shows its
+  // controls.
+  //
+  // Worth being clear about what this is: friction, not protection. The
+  // bytes have to reach the browser to be rendered at all, so anyone
+  // determined can still save the page or open the content URL directly.
+  // It removes the accidental one-click download, which is the case that
+  // actually matters in day-to-day sharing.
+  const pdfViewerUrl = `${contentUrl}#toolbar=0&navpanes=0`;
   const expires = new Date(shared.expiresAt);
 
   return (
@@ -95,7 +107,11 @@ export default async function SharedDocumentPage({ params }: { params: Promise<{
           // eslint-disable-next-line @next/next/no-img-element -- same-origin proxied stream, not an optimizable remote image
           <img src={contentUrl} alt={shared.originalFilename} className="w-full rounded-xl border object-contain" />
         ) : (
-          <iframe src={contentUrl} title={shared.originalFilename} className="h-[70vh] w-full rounded-xl border" />
+          <iframe
+            src={pdfViewerUrl}
+            title={shared.originalFilename}
+            className="h-[70vh] w-full rounded-xl border"
+          />
         )
       ) : (
         <div className="border-border flex flex-col items-center gap-3 rounded-xl border border-dashed py-16 text-center">
