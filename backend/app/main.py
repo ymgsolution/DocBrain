@@ -9,6 +9,8 @@ from app.modules.auth.router import router as auth_router
 from app.modules.dashboard.router import router as dashboard_router
 from app.modules.documents.router import router as documents_router
 from app.modules.reviews.router import router as reviews_router
+from app.modules.shares.public_router import router as public_shares_router
+from app.modules.shares.router import router as shares_router
 from app.modules.taxonomy.router import router as taxonomy_router
 from app.modules.versions.router import router as versions_router
 
@@ -32,6 +34,9 @@ app.include_router(auth_router)
 app.include_router(documents_router)
 app.include_router(versions_router)
 app.include_router(taxonomy_router)
+app.include_router(shares_router)
+# The only unauthenticated router — see its module docstring.
+app.include_router(public_shares_router)
 app.include_router(reviews_router)
 app.include_router(dashboard_router)
 

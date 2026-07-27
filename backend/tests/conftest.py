@@ -36,6 +36,9 @@ from app.modules.documents.service import DocumentService
 from app.modules.versions.repository import VersionRepository
 from app.modules.versions.router import get_document_service as get_document_service_for_versions
 from app.modules.versions.router import get_version_service
+from app.modules.shares.repository import ShareLinkRepository
+from app.modules.shares.router import get_share_service
+from app.modules.shares.service import ShareService
 from app.modules.versions.service import VersionService
 from app.storage.local_adapter import LocalFileSystemStorage
 
@@ -85,12 +88,16 @@ def client(db_session: Session, storage: LocalFileSystemStorage) -> Iterator[Tes
     def _version_service() -> VersionService:
         return VersionService(VersionRepository(db_session), storage)
 
+    def _share_service() -> ShareService:
+        return ShareService(ShareLinkRepository(db_session), DocumentRepository(db_session), storage)
+
     app.dependency_overrides[get_db_session] = _session_override
     # documents/ and versions/ each define their own get_document_service;
     # dependency_overrides keys on the function object, so both need one.
     app.dependency_overrides[get_document_service] = _document_service
     app.dependency_overrides[get_document_service_for_versions] = _document_service
     app.dependency_overrides[get_version_service] = _version_service
+    app.dependency_overrides[get_share_service] = _share_service
     try:
         yield TestClient(app)
     finally:
