@@ -21,6 +21,7 @@ import { AiSuggestionsCard } from "@/features/documents/components/ai-suggestion
 import { SimilarDocumentsCard } from "@/features/documents/components/similar-documents-card";
 import { EditMetadataForm } from "@/features/documents/components/edit-metadata-form";
 import { MarkReviewedDialog } from "@/features/documents/components/mark-reviewed-dialog";
+import { ShareDialog } from "@/features/documents/components/share-dialog";
 import { VersionsTab } from "@/features/documents/components/versions-tab";
 import { DocumentActivityTab } from "@/features/documents/components/activity-tab";
 
@@ -39,6 +40,7 @@ export default function DocumentDetailsPage() {
 
   const [editing, setEditing] = useState(false);
   const [markReviewedOpen, setMarkReviewedOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [uploadVersionOpen, setUploadVersionOpen] = useState(false);
 
@@ -106,6 +108,7 @@ export default function DocumentDetailsPage() {
         onEdit={() => setEditing(true)}
         onDelete={() => setDeleteOpen(true)}
         onMarkReviewed={() => setMarkReviewedOpen(true)}
+        onShare={() => setShareOpen(true)}
         onUploadVersion={() => setUploadVersionOpen(true)}
       />
 
@@ -143,6 +146,7 @@ export default function DocumentDetailsPage() {
       </Tabs>
 
       <MarkReviewedDialog documentId={document.id} open={markReviewedOpen} onOpenChange={setMarkReviewedOpen} />
+      <ShareDialog documentId={document.id} open={shareOpen} onOpenChange={setShareOpen} />
 
       {uploadVersionOpen && (
         <UploadVersionDialog documentId={document.id} open={uploadVersionOpen} onOpenChange={setUploadVersionOpen} />
