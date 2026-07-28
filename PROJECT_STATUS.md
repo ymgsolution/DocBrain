@@ -1,6 +1,6 @@
 # DocBrain Project Status
 
-**Live:** API https://docbrain-production-00e4.up.railway.app (verified) · frontend on a custom domain — the original `doc-brain-xi.vercel.app` now 404s, so update this line with the current domain. `PUBLIC_APP_URL` on **both** Railway services must match it, or generated share links point at the wrong host.
+**Live:** frontend https://docbrain-pa.vercel.app · API https://docbrain-production-00e4.up.railway.app — both verified 2026-07-27, including a share link generated on Railway and opened anonymously on the frontend. Note `PUBLIC_APP_URL` on **both** Railway services must track the frontend domain; if it drifts, every newly generated share link points at the wrong host (the URL is built at creation time, not stored).
 
 > **This is the single source of truth for the project.** It must be updated whenever a feature is added, modified, refactored, removed, or completed. See [Important Rules](#important-rules) at the bottom.
 
