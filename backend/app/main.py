@@ -15,6 +15,7 @@ from app.modules.reviews.router import router as reviews_router
 from app.modules.shares.public_router import router as public_shares_router
 from app.modules.shares.router import router as shares_router
 from app.modules.taxonomy.router import router as taxonomy_router
+from app.modules.users.router import router as admin_users_router
 from app.modules.versions.router import router as versions_router
 
 configure_logging()
@@ -40,6 +41,7 @@ app.include_router(versions_router)
 app.include_router(taxonomy_router)
 app.include_router(invitations_router)
 app.include_router(public_invitations_router)
+app.include_router(admin_users_router)
 app.include_router(shares_router)
 # The only unauthenticated router — see its module docstring.
 app.include_router(public_shares_router)
