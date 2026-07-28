@@ -1,10 +1,12 @@
 # DocBrain Project Status
 
-**Live:** frontend https://docbrain-pa.vercel.app · API https://docbrain-production-00e4.up.railway.app — both verified 2026-07-27, including a share link generated on Railway and opened anonymously on the frontend. Note `PUBLIC_APP_URL` on **both** Railway services must track the frontend domain; if it drifts, every newly generated share link points at the wrong host (the URL is built at creation time, not stored).
+**Live:** frontend https://docbrain-pa.vercel.app · API https://docbrain-production-00e4.up.railway.app — both verified 2026-07-28, including real password login, admin user management, and an invitation email delivered from `noreply@ymgsolution.com` (confirmed `delivered` in Resend's own log). Note `PUBLIC_APP_URL` on **both** Railway services must track the frontend domain; if it drifts, every newly generated share link points at the wrong host (the URL is built at creation time, not stored).
+
+> **⚠️ One database serves both local development and production.** `backend/.env` points at the same Supabase Postgres Railway uses. Running `alembic upgrade head` locally migrates *production*, and if the deployed branch doesn't yet contain that revision file, the API crash-loops on `Can't locate revision identified by ...`. This has happened once for real (2026-07-28, revision `3711e1bdb61b`). **Always merge and deploy the code before, or at the same time as, running a migration locally.** A separate Supabase project for local work is the real fix — see §10 Open.
 
 > **This is the single source of truth for the project.** It must be updated whenever a feature is added, modified, refactored, removed, or completed. See [Important Rules](#important-rules) at the bottom.
 
-**Last updated:** 2026-07-27 (external share links built and merged; app deployed to Railway + Vercel + Supabase; backend API test suite at 109 tests). See §13 Change Log for the full sequence.
+**Last updated:** 2026-07-28 (real invite-only authentication in four phases; admin user management with deactivate/reactivate/role changes; share-link revocation gap closed; backend suite at 178 tests). See §13 Change Log for the full sequence.
 
 ---
 
@@ -15,9 +17,9 @@
 | **Project Name** | DocBrain |
 | **Purpose** | A focused document workspace that solves six specific pains: hard-to-find documents, no standard naming, unclear "latest version," no version tracking, no review reminders, no centralized dashboard. Phase 1 is deliberately scoped to *no AI features* — a clean, structured corpus is treated as the prerequisite/quality-gate for Phase 2 AI work, not a parallel effort. |
 | **Hackathon** | Ahmedabad AI Hackathon #5 — "Smart Document Manager" problem statement |
-| **Current Technology Stack** | Frontend: Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind CSS v4 + shadcn/ui (Base UI primitives, not Radix) + TanStack Query + React Hook Form + Zod + next-themes + Lucide icons. Backend: Python 3.11+ / FastAPI, managed with `uv`. Database: Supabase Postgres (free tier), accessed directly via SQLAlchemy (not Supabase's client SDK/PostgREST). Storage: local filesystem (`backend/uploads/`), not Supabase Storage. Auth: mock identity (pick a seeded user, no password) with real signed JWTs, held in an httpOnly cookie set by a Next.js route handler. |
+| **Current Technology Stack** | Frontend: Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind CSS v4 + shadcn/ui (Base UI primitives, not Radix) + TanStack Query + React Hook Form + Zod + next-themes + Lucide icons. Backend: Python 3.11+ / FastAPI, managed with `uv`. Database: Supabase Postgres (free tier), accessed directly via SQLAlchemy (not Supabase's client SDK/PostgREST). Storage: **Supabase Storage** via its S3-compatible API (boto3), behind a swappable `StoragePort`; the local-filesystem adapter still exists and is what the test suite runs against. Auth: **real passwords** (argon2id via `pwdlib`), invite-only account creation, with signed JWTs held in an httpOnly cookie set by a Next.js route handler. Email: Resend behind an `EmailSender` port. |
 | **Current Architecture** | Backend: layered (router → service → repository), package-by-feature under `app/modules/`. Frontend: feature-first (`src/features/`) for business logic + a BFF proxy (`/api/bff/[...path]`) that turns the httpOnly session cookie into a `Bearer` header before forwarding to FastAPI — the browser never sees the JWT. |
-| **Deployment Plan** | Frontend → Vercel; backend → local for the demo (or a small always-on host later — the API base URL is externalised config, so this is a one-line change whenever it happens, not a code change). Not yet deployed anywhere — currently local-only. |
+| **Deployment** | **Live.** Frontend → Vercel (production branch is `develop`, not `main` — `main` is vestigial and ~16 commits behind). API + AI worker → Railway, one Docker image with different start commands. Database + file storage → Supabase. Email → Resend on the verified domain `ymgsolution.com`. Pushing to `develop` auto-deploys both halves. |
 
 Full architecture rationale lives in [docs/DOCBRAIN-ARCHITECTURE.md](docs/DOCBRAIN-ARCHITECTURE.md) (authoritative; supersedes `docs/PHASE-1-ARCHITECTURE.md`, which is kept only for its product-thinking sections).
 
@@ -30,12 +32,14 @@ Full architecture rationale lives in [docs/DOCBRAIN-ARCHITECTURE.md](docs/DOCBRA
 - ✅ Database Design
 - ✅ Backend Foundation
 - ✅ Backend APIs (all modules from §9.1 of the architecture doc are built and manually verified)
-- 🟨 Testing (extensive manual/curl verification done per-feature on the backend; browser-driven Playwright smoke test done for the shell; no automated `pytest`/component-test suite yet — that's Phase 6 in the roadmap)
+- ✅ Testing — **178 backend tests**, run against the real Postgres schema inside a rolled-back transaction (verified to leave zero rows). Covers auth, invitations, password reset, admin user management, documents, versions, reviews/trash, shares, storage adapters and the AI track. No frontend component tests yet — verification there is `tsc` + `eslint` + a production build + driving the running app.
 - ✅ Frontend Phase 4 — **complete** (Phase 4.1 — Application Shell. 4.2 — Dashboard. 4.3 — Document Explorer. 4.4 — Upload Document. 4.5 — Document Details. 4.6 — Version History. 4.7 — Categories Admin. 4.8 — Tags Admin. 4.9 — Settings: profile (read-only), theme toggle, default page size — both preferences genuinely wired into the app, not just stored: theme persists across login and the Explorer's page size actually reads the saved value. Every screen from §6 (S1–S10) is now built and verified end-to-end in a real browser. Phase 5 (Integration hardening) and Phase 6 (Testing) are next per the roadmap — see §11)
 - ✅ Pending Reviews UI + Trash UI (§6.7/§6.8) — the two remaining documented screens (S6, S8) that sat outside the strict 4.1–4.9 module order. `/reviews` (Reviewer/Admin queue, filters, mark-as-reviewed) and `/trash` (all users, owner-or-Admin scoped, restore + Admin-only type-to-confirm permanent delete). Found and fixed a backend gap along the way: there was no way to list trashed documents at all — added `GET /api/v1/documents/trash`.
 - ✅ Phase 5 — Integration (§19.6) — an audit pass, not new construction: verified the canonical J2 flow (§4.3, Upload→Categorize→Search→View→Update Version→Dashboard Refresh) works end-to-end without touching a terminal, then systematically audited every screen's error handling against §16.5's HTTP-status contract via a dedicated research pass, closing the real gaps it found — see §3 and §9 for the full list (422/409 field-level errors now map onto the actual form field instead of a generic toast, the XHR upload path now redirects on 401 like every other request, a logic bug in Version History's conflict handling was fixed, and the app finally has styled `not-found.tsx`/`error.tsx` instead of falling through to Next's defaults).
 - ✅ **AI feature track (new, separate from the §19 hackathon roadmap)** — live and user-facing, not shadow mode. Text extraction (classic parsing) → Smart Rename/Tags/Summary (`AiSuggestionsCard` on Document Details, real Gemini calls via `GeminiProvider`) → Similar Document Detection (`document_vector_embeddings` + `pgvector`, `SimilarityService`, `GET /documents/{id}/similar`, `SimilarDocumentsCard`) are all built, wired into the persistent worker (`app/ai_jobs/main.py`), and verified end-to-end against real data. `AIProvider`/`EmbeddingProvider` stay swappable Protocols; `generate_text` (chat/RAG) is the one remaining stub. No review UI yet for AI suggestions (the `accepted`/`edited` columns exist for it, unused). Next candidates: a review UI, Duplicate Detection / Semantic Search (both designed to reuse the existing `SimilarityService` as-is), or RAG chat.
-- ⬜ Deployment
+- ✅ **Real authentication (invite-only)** — replaced the mock persona picker. Password login with argon2id, admin-issued invitations as the only route to an account, self-service password reset, and transactional email via Resend. Four phases, all live. See §3.
+- ✅ **Admin user management** — deactivate / reactivate / change role, with search, status filter and paging, on a single **People** page (Members + Invitations tabs). Deactivation is immediate (the user row is re-read every request) and also revokes reach: outstanding reset tokens are consumed and the person's share links stop resolving. See §3.
+- ✅ Deployment — live on Vercel + Railway + Supabase + Resend; pushes to `develop` auto-deploy.
 
 ---
 
@@ -73,8 +77,8 @@ Full architecture rationale lives in [docs/DOCBRAIN-ARCHITECTURE.md](docs/DOCBRA
 
 ### Authentication
 
-- **Mock login + real JWT** — `POST /auth/login` (email only, must match a seeded user), `GET /auth/users` (persona picker), `GET /auth/me`, `POST /auth/logout`. Tokens are real signed JWTs (HS256, 24h expiry) despite the identity source being mocked.
-  - Completed: 2026-07-23
+- ~~**Mock login + real JWT**~~ — *superseded 2026-07-28 by real password authentication; see "Authentication — Real Passwords, Invite-Only" below.* The persona picker (`GET /auth/users` returning a clickable list of seeded users, no password) is gone from the login page. That endpoint still exists but is now an authenticated **colleague directory** powering the Pending Reviews owner filter, and it deliberately returns only *active* users.
+  - Completed: 2026-07-23 · Superseded: 2026-07-28
 - **Authorization plumbing** — `get_current_user` and `require_role(*roles)` FastAPI dependencies; used by every protected endpoint since.
   - Completed: 2026-07-23
 - **Error handling foundation** — domain exception hierarchy (`NotFoundError`, `UnauthorizedError`, `PermissionDeniedError`, `ConflictError`, `ValidationError`, `PayloadTooLargeError`, `UnsupportedMediaTypeError`, `GoneError`) mapped to the exact `{error:{code,message,correlationId,fields?}}` envelope from architecture doc §16.6. Correlation-ID middleware on every request/response.
@@ -467,6 +471,37 @@ An audit pass, not new construction — every screen was already wired to the re
   - Completed: 2026-07-25
   - Notes: Re-verified live afterwards against the real Supabase-backed app — all 8 active documents downloaded successfully (11 KB up to 21 MB), confirming the change is safe in production and not just green in tests.
 
+### Authentication — Real Passwords, Invite-Only (4 phases)
+
+*Replaced the mock persona picker. Delivered in four phases, each verified live before the next began. Decisions taken up front: **invite-only** (no open signup), **Resend** for email, and the existing demo accounts kept with a known password so the seeded corpus stays usable.*
+
+- **Phase 1 — Password login.** `app/core/passwords.py` wraps `pwdlib`'s `PasswordHash.recommended()` (argon2id — memory-hard, unlike a bare SHA family hash). `users.password_hash` is **nullable on purpose**: an invited person exists, with a role and possibly assigned documents, before they've ever set a password, and `verify_password` rejects every attempt while it's NULL — so a pending invite cannot be logged into. Login is **timing-equalised** against a module-level `_DUMMY_HASH`, so a wrong email and a wrong password take the same time to answer; without it the fast path tells an attacker which addresses have accounts. One error message covers every failure — unknown email, wrong password, deactivated account, invited-but-never-accepted — for the same reason.
+  - Completed: 2026-07-28
+- **Phase 2 — Invite-only account creation.** `invitations` table storing only a **SHA-256 hash** of the token (plain SHA-256 is correct here, unlike for passwords: the token is 32 bytes of `secrets` entropy, so there is nothing to brute-force). Admin-only issue/revoke; the raw token is returned exactly once, in the create response, so the admin can copy the link — email is a convenience on top, never a prerequisite. Accepting is the **only** path that mints a user, and it deliberately does *not* create a session: the new person signs in with the password they just chose, which proves it works and keeps session creation on one well-tested path. `peek` and `accept` return an identical error for unknown, expired, revoked and already-used tokens.
+  - Completed: 2026-07-28
+- **Phase 3 — Transactional email.** `EmailSender` port with two adapters: `ResendEmailSender` (httpx straight to Resend's API — no SDK) and `LoggingEmailSender`, selected automatically when `RESEND_API_KEY` is blank so the whole app still runs without an email provider. Sends are **best-effort**: a delivery failure must not fail the invitation, because the row is already committed and the admin has the link — raising there would destroy a valid invitation over a provider problem *and* leave that address unusable, since a pending invite blocks re-inviting.
+  - Completed: 2026-07-28
+- **Phase 4 — Auth UI.** Login form, accept-invite, forgot-password, reset-password, and an admin invitations screen. `proxy.ts` gained `PUBLIC_PATHS` (`/login`, `/forgot-password` — reachable *without* a session, redirected away *with* one) and `SHARED_PATHS` (`/share/`, `/invite/`, `/reset-password/` — reachable either way, because an internal user checking a link they just sent must see what the recipient sees). A separate `/api/public/[...path]` route handler never reads the session cookie at all, keeping the unauthenticated surface structurally distinct from the BFF.
+  - Completed: 2026-07-28
+  - Notes: Password reset lives at `/api/v1/public/auth/password-reset`, expires in **30 minutes** (minutes, not days — a reset link is used moments after being requested, and a long window is just a larger opening for whoever reaches the mailbox later), is single-use, and invalidates any outstanding token for that user when a new one is issued. `request()` returns `None` rather than an error for an unknown or inactive email, so the endpoint can't be used to discover accounts.
+  - Notes: The invariant **"everything unauthenticated lives under `/public/`"** is enforced by convention and checked against the deployed OpenAPI spec. Only `/auth/login` and `/auth/logout` sit outside it, both by design.
+
+### Admin User Management — Deactivate, Reactivate, Change Role
+
+*The gap left by invite-only signup: an accepted invitation was permanent. `users.is_active` existed and was already enforced everywhere, but nothing could flip it.*
+
+- **Deactivation rather than deletion**, because deletion is both blocked and wrong. `documents.owner_id` is `ON DELETE RESTRICT`, so Postgres physically refuses once a user owns anything, and `activity_events.actor_id` / `document_versions.uploaded_by` would lose the author of real history. Deactivating keeps all of it, is reversible, and **takes effect immediately** — `get_current_user` re-reads the user row on every request, so an already-issued 24-hour token stops being accepted on the next click. No token blacklist or session table needed.
+  - Completed: 2026-07-28
+- **Two guards, both in the service** rather than left to the UI to hide, since either mistake costs a hand-written SQL repair against production: you cannot deactivate or demote **yourself** (the next request 401s or 403s, and the page you'd use to undo it is the one you just lost), and you cannot do it to the **last active admin**. The second is *unreachable over HTTP* — a caller must be an active admin, so if the target is the last one it's them and the self-check fires first — so it's covered at the service level for entry points that skip `require_role` (a maintenance script or future CLI).
+  - Completed: 2026-07-28
+- **Deactivation revokes reach, not just the account.** Outstanding password-reset tokens are consumed, and `ShareLinkRepository.get_usable_by_token_hash` now joins the creator and requires them active. Without that, someone cut off this morning still has every link they ever sent serving company documents, and an admin would have to hunt them down one by one. The check lives in the query alongside expiry and revocation, so no endpoint can forget one of the three.
+  - Completed: 2026-07-28
+- **`GET /admin/users`** — server-side search across display name *and* email, `status` filter (active / inactive / all), paging. Kept as its own admin-prefixed module rather than widening `GET /auth/users`: that one is the colleague directory every signed-in user can read and deliberately shows only active people, so widening it would leak former staff to the whole workspace. The search escapes `%` and `_` so a wildcard typed into the box stays literal.
+  - Completed: 2026-07-28
+- **One People page, two tabs** (Members + Invitations) — two halves of the same job, so one nav entry instead of two. `/admin/invitations` redirects to `/admin/people?tab=invitations` rather than 404ing, so links already sent round still land in the right place. The tab is held in the URL, which is what makes that redirect land precisely.
+  - Completed: 2026-07-28
+  - Notes: 28 new tests (178 total). Verified end to end against the running stack *through the frontend proxy* — deactivate → login 401 → gone from the directory → reactivate → login 200 — then every account touched was restored and the table re-queried to confirm.
+
 ---
 
 ## 4. Pending Features
@@ -521,14 +556,23 @@ DocBrain/
 │   │   │                           # review, trash, dashboard, mappers.py (ORM → DTO)
 │   │   ├── modules/                # package-by-feature
 │   │   │   ├── auth/                (router, service, repository — also owns
-│   │   │   │                        #   GET/PATCH /auth/me/preferences, Phase 4.9)
+│   │   │   │                        #   GET/PATCH /auth/me/preferences, Phase 4.9,
+│   │   │   │                        #   public_router.py for password reset, and
+│   │   │   │                        #   password_reset.py — the 30-min token service)
+│   │   │   ├── invitations/         (router = admin issue/revoke,
+│   │   │   │                        #   public_router = peek/accept, service, repository)
+│   │   │   ├── users/               (admin user management — router, service, repository.
+│   │   │   │                        #   /api/v1/admin/users; deliberately separate from auth/,
+│   │   │   │                        #   which serves a different audience)
 │   │   │   ├── documents/           (router, service, repository — also owns
 │   │   │   │                        #   GET /documents/trash, added for the Trash screen)
 │   │   │   ├── versions/            (router, service, repository)
 │   │   │   ├── taxonomy/            (router, service, repository)
 │   │   │   ├── reviews/             (router, service, repository)
+│   │   │   ├── shares/              (router, public_router, service, repository, tokens)
 │   │   │   └── dashboard/           (router, service, repository)
-│   │   ├── storage/                 # StoragePort, LocalFileSystemStorage, checksum
+│   │   ├── email/                   # EmailSender port + Resend/logging adapters, messages.py
+│   │   ├── storage/                 # StoragePort, Local + Supabase adapters, factory, checksum
 │   │   ├── text_extraction/         # AI feature track (pre-Gemini) — pure, DB-decoupled
 │   │   │   ├── port.py              #   TextExtractor protocol, ExtractionResult
 │   │   │   ├── extractors/          #   pdf, docx, xlsx, pptx, plain
@@ -591,14 +635,22 @@ DocBrain/
     │   │   │   │   └── [id]/page.tsx  # Document Details (4.5) + Version History (4.6)
     │   │   │   ├── admin/
     │   │   │   │   ├── categories/page.tsx  # Categories admin (Phase 4.7) — Admin-only, 403 guard
+    │   │   │   │   ├── people/page.tsx      # People (2026-07-28) — Members + Invitations tabs,
+    │   │   │   │   │                        #   Suspense-wrapped (useSearchParams drives the tab)
+    │   │   │   │   ├── invitations/page.tsx # redirect -> /admin/people?tab=invitations
     │   │   │   │   └── tags/page.tsx        # Tags admin (Phase 4.8) — rename/merge/delete
     │   │   │   ├── reviews/page.tsx         # Pending Reviews (S6) — Reviewer/Admin-only, 403 guard
     │   │   │   ├── trash/page.tsx           # Trash (S8) — all users, server-side owner-or-Admin scoping
     │   │   │   └── settings/page.tsx        # Settings (Phase 4.9) — profile, theme, page size —
     │   │   │                                #   Phase 4 complete after this
+    │   │   ├── invite/[token]/page.tsx        # accept an invitation (no session required)
+    │   │   ├── reset-password/[token]/page.tsx # set a new password from an emailed link
+    │   │   ├── (auth)/forgot-password/page.tsx # request a reset link
     │   │   └── api/
     │   │       ├── auth/login/route.ts    # sets the httpOnly session cookie
     │   │       ├── auth/logout/route.ts   # clears it
+    │   │       ├── public/[...path]/route.ts # NEVER reads the session cookie — keeps the
+    │   │       │                             #   unauthenticated surface structurally separate
     │   │       └── bff/[...path]/route.ts # cookie -> Bearer header proxy to FastAPI
     │   ├── components/
     │   │   ├── ui/                  # 23 shadcn primitives (Base UI, not Radix)
@@ -609,9 +661,16 @@ DocBrain/
     │   │   │                        # PaginationBar, UploadDropzone, DownloadLink, ForbiddenState
     │   │   └── providers/           # QueryProvider, ThemeProvider
     │   ├── features/
-    │   │   ├── auth/                # types.ts, api.ts, hooks.ts (login/logout/me/personas +
+    │   │   ├── auth/                # types.ts, api.ts, hooks.ts (login/logout/me/directory +
     │   │   │                        #   getPreferences/updatePreferences, Phase 4.9),
-    │   │   │                        # components/login-form.tsx
+    │   │   │                        # public-api.ts (invite peek/accept, password reset —
+    │   │   │                        #   goes through /api/public, never the BFF),
+    │   │   │                        # components/ (LoginForm, AcceptInviteForm,
+    │   │   │                        #   ForgotPasswordForm, ResetPasswordForm, AuthShell)
+    │   │   ├── invitations/         # types.ts, api.ts, hooks.ts,
+    │   │   │                        # components/invitations-tab.tsx
+    │   │   ├── users/               # api.ts, hooks.ts (admin user management),
+    │   │   │                        # components/members-tab.tsx
     │   │   ├── taxonomy/            # types.ts, api.ts (categories: list/create/update/delete;
     │   │   │                        #   tags: list/rename/merge/delete), hooks.ts,
     │   │   │                        # components/ (CategoryFormDialog, RenameTagDialog,
@@ -658,11 +717,11 @@ DocBrain/
 
 **Hosted on:** Supabase Postgres (free tier), accessed directly via SQLAlchemy — no PostgREST/client SDK.
 
-### Tables (13)
+### Tables (15, plus `alembic_version`)
 
 | Table | Purpose |
 |---|---|
-| `users` | Seeded identities; role = EMPLOYEE / REVIEWER / ADMIN |
+| `users` | Identities; role = EMPLOYEE / REVIEWER / ADMIN. `password_hash` (argon2id) is **nullable** — an invited person exists before they set one. `is_active` gates both login and every authenticated request; `deactivated_at`/`deactivated_by` record who cut someone off and when. Never deleted to revoke access — see §3. |
 | `categories` | Controlled vocabulary; case-insensitive unique name, optional default review period |
 | `documents` | Logical document identity; owns `search_vector`, `current_version_id`, review/trash state |
 | `document_versions` | Append-only version history; unique `(document_id, version_number)` |
@@ -673,7 +732,9 @@ DocBrain/
 | `ai_jobs` | *(AI feature track)* Shared background-work queue — `job_type`/`status`/`attempt_count`/`next_retry_at`. Designed for reuse by every future AI stage (extraction, metadata generation, and embeddings today; more later), not extraction-specific. `job_type` now has three values: `EXTRACT`, `GENERATE_METADATA`, `GENERATE_EMBEDDING`. |
 | `ai_document_analysis` | *(AI feature track, Phase 2, shadow mode)* One row per `document_version_id` (unique FK, CASCADE). Named `analysis`, not `metadata`, so future AI outputs (summaries, entities, topics, compliance results) can land as additive nullable columns without renaming the table again. Holds the validated `suggested_*`/`confidence_score` fields, the provider's `raw_response`, full per-execution observability (model/prompt version/tokens/latency/retries), and nullable review fields (`accepted`/`accepted_by`/`accepted_at`/`edited`) for a review UI that doesn't exist yet. Nothing reads this table from any user-facing response. |
 | `document_vector_embeddings` | *(AI feature track — Similar Document Detection)* One row per `document_version_id` (unique FK, CASCADE). Kept fully separate from `ai_document_analysis` — a 768-dim `pgvector` column (`gemini-embedding-001`, `task_type=SEMANTIC_SIMILARITY`), plus `embedding_model`/`embedding_dimension` and the same job-observability columns (`status`, `error_message`, `retry_count`, `latency_ms`, `generated_at`, `input_char_count`) `ai_document_analysis` has. Powers `GET /documents/{id}/similar` today; designed to also back Duplicate Detection and Semantic Search later without a new table. |
-| `share_links` | *(External sharing)* One row per issued link. Stores only a **SHA-256 hash** of the token (never the token itself), the document, the **pinned** `document_version_id`, `expires_at`, `revoked_at`, plus `view_count`/`last_viewed_at`. Backs the app's only unauthenticated read path — see §3. Both FKs cascade, so hard-deleting a document takes its links with it and can't leave a live link pointing at content that no longer exists. |
+| `share_links` | *(External sharing)* One row per issued link. Stores only a **SHA-256 hash** of the token (never the token itself), the document, the **pinned** `document_version_id`, `expires_at`, `revoked_at`, plus `view_count`/`last_viewed_at`. Backs the app's only unauthenticated read path — see §3. Both FKs cascade, so hard-deleting a document takes its links with it and can't leave a live link pointing at content that no longer exists. **Resolution also requires `created_by` to still be an active user**, so deactivating someone kills the links they sent out. |
+| `invitations` | *(Auth)* The only route to a new account. SHA-256 **hash** of a 32-byte token, target `email` + `role`, `expires_at`, `revoked_at`, `accepted_at`, `accepted_user_id` (`ON DELETE SET NULL`), `invited_by`. Single-use: acceptance stamps `accepted_at` in the same transaction that creates the user, so the two can't diverge. |
+| `password_reset_tokens` | *(Auth)* Deliberately **not** merged with `invitations` behind a `purpose` column — they look similar but mean opposite things (one creates an account, one changes credentials on an existing one), and merging would let a bug make one act as the other. Hashed token, `user_id` (CASCADE), 30-minute `expires_at`, `used_at`. |
 
 ### Relationships
 
@@ -686,8 +747,12 @@ DocBrain/
 - `document_versions` → `ai_document_analysis` — 1:1, `ON DELETE CASCADE`, `passive_deletes=True` declared on the relationship from the start (the extraction track hit the eager-load/hard-delete 500 once already — see §9 — no reason to rediscover it here even though this relationship isn't eager-loaded anywhere yet)
 - `ai_document_analysis.accepted_by` → `users.id` — nullable, unused until a review UI exists
 - `document_versions` → `document_vector_embeddings` — 1:1, `ON DELETE CASCADE`, `passive_deletes=True` (same reasoning as `analysis`/`extracted_text`) — confirmed live: hard-deleting a document with an embedding row cascades cleanly, zero errors
+- `users` → `invitations` (`invited_by`, RESTRICT-by-default) and `invitations.accepted_user_id` → `users` (`ON DELETE SET NULL`)
+- `users` → `password_reset_tokens` — 1:N, `ON DELETE CASCADE`
+- `users.deactivated_by` → `users.id` — self-referential, `ON DELETE SET NULL`. Exposed on the ORM as a `deactivator` relationship with `remote_side`/`foreign_keys` spelled out, because SQLAlchemy can't infer which end of a `users`→`users` FK a side belongs to
+- **Eleven FKs point at `users`, and two of them make deletion impossible in practice** — `documents.owner_id` is `ON DELETE RESTRICT` (Postgres refuses outright), and `activity_events.actor_id` / `document_versions.uploaded_by` are NOT NULL with no cascade. This is the structural reason revoking access is `is_active = false`, not a `DELETE`
 
-### Migrations (8, all applied)
+### Migrations (12, all applied)
 
 1. `d3070d18c042_initial_schema` — all 8 original tables, indexes, and the 4 triggers.
 2. `e97f9d207d17_fix_restored_from_version_id_ondelete_` — bug fix (see §10 Known Issues).
@@ -697,6 +762,10 @@ DocBrain/
 6. `516ce3585a6e_add_storage_provider_to_document_` — adds `document_versions.storage_provider` (plain string, `server_default='local'`, backfilling all 106 pre-existing rows in the same statement). Storage migration track — see §3/§9.
 7. `acd53d2f12ab_add_share_links_table` — `share_links` (hashed token, pinned version, expiry, revoked-at, view count). Purely additive; both FKs cascade from documents/versions.
 8. `b7c1e4a9d520_add_shared_activity_event_type` — `activity_event_type` enum gains `SHARED` (hand-written `ALTER TYPE`, same reason as 4 and 5). Kept as its own revision rather than folded into 7, which was already applied.
+9. `866a737e169d_add_password_hash_to_users` — nullable `users.password_hash`. Nullable on purpose: an invited user exists before they have a password, and every pre-existing row predates passwords entirely.
+10. `b6bbfef32e8d_add_invitations_table` — `invitations`. Note `postgresql.ENUM(..., create_type=False)` is required to reuse the existing `user_role` type; a generic `sa.Enum` silently drops it.
+11. `3711e1bdb61b_add_password_reset_tokens_table` — `password_reset_tokens`. **This is the revision that crash-looped Railway on 2026-07-28** — applied to the shared database from a laptop while `develop` still lacked the file. See the warning at the top of this document.
+12. `b44952831669_add_deactivated_at_and_deactivated_by_` — `users.deactivated_at` + `users.deactivated_by` (self-referential FK, `ON DELETE SET NULL` so an admin leaving neither blocks nor erases the record of people they deactivated).
 
 ### Seed Data
 
@@ -714,6 +783,8 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 
 **Note (2026-07-25):** the *live* dev DB no longer matches this table — 52 of the seeded documents (the ones with no real backing file) were deleted as housekeeping (see §13 Change Log), leaving 8 real documents. `scripts/seed.py` itself was **not** modified, so re-running it will recreate the original ~53-document corpus, dummy rows included — this table still describes that script's actual output, not the current pruned state.
 
+**Note (2026-07-28):** `users` is now **6** — the five seeded accounts plus one real account created through the invitation flow. Seeded users have **no password** until `uv run python -m scripts.set_demo_passwords` is run, which sets them all to `Test@123`; without it nobody can sign in, because `scripts/seed.py` predates passwords and leaves `password_hash` NULL. Since local and production share one database, that script has already been run against production. Demo accounts are listed in the README.
+
 ### Indexes
 
 - GIN on `documents.search_vector`
@@ -726,16 +797,19 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 - Composite: `ai_jobs (status, next_retry_at)` — the worker's claim query
 - Unique: `document_vector_embeddings (document_version_id)`
 - HNSW (cosine ops): `document_vector_embeddings (embedding)` — the ANN index `SimilarityService` queries against
+- Unique: `invitations (token_hash)`, `password_reset_tokens (token_hash)` — both also indexed on `user_id`/`email` for the outstanding-token lookups
 
 ---
 
 ## 7. Backend Status
 
-**All Phase 3 modules complete.** 20 unique routes, 24 method+path combinations, all manually verified against real Supabase data (not mocks) — real PDF uploads, byte-for-byte download checks, real permission-denial tests per role.
+**All Phase 3 modules complete, plus the auth and admin tracks.** **39 unique paths, 49 method+path combinations**, verified against real Supabase data (not mocks) — real PDF uploads, byte-for-byte download checks, real permission-denial tests per role.
 
 | Module | Router | Service | Repository | Notes |
 |---|---|---|---|---|
-| Auth | ✅ | ✅ | ✅ | Mock login, real JWT, `/auth/me/preferences` GET+PATCH (added 2026-07-23 for Settings) |
+| Auth | ✅ | ✅ | ✅ | **Real password login** (argon2id, timing-equalised), `/auth/me/preferences` GET+PATCH, plus a public router at `/api/v1/public/auth/*` for password reset. `GET /auth/users` is now an authenticated colleague directory (active users only), not a persona picker |
+| Invitations | ✅ | ✅ | ✅ | Admin-only issue/revoke at `/invitations`; the accept half is a separate **public** router at `/api/v1/public/invitations/*` |
+| Admin Users | ✅ | ✅ | ✅ | `GET /admin/users` (search / status filter / paging), `POST /{id}/deactivate`, `POST /{id}/reactivate`, `PATCH /{id}/role`. Admin-only, own prefix — deliberately not folded into `/auth/users`, which has a different audience |
 | Documents | ✅ | ✅ | ✅ | Full CRUD + Trash (soft delete/restore/**list**, added 2026-07-23) + hard delete |
 | Versions | ✅ | ✅ | ✅ | Upload, download, restore |
 | Taxonomy | ✅ | ✅ | ✅ | Categories + Tags, admin-only mutations |
@@ -746,7 +820,7 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 
 - **Middleware:** CORS, correlation-ID (`X-Correlation-Id` on every request/response).
 - **Wire format:** camelCase JSON in and out (`app/schemas/base.py`'s `CamelModel`, plus `alias=` on non-path `Query`/`Form` params) — matches architecture doc §8 exactly. Fixed 2026-07-23; previously the implementation was snake_case despite the doc specifying camelCase. Internal Python code is unaffected (still snake_case attributes/kwargs).
-- **Authentication:** JWT (HS256), `HTTPBearer` security scheme (Swagger `/docs` shows one "Authorize" button).
+- **Authentication:** real passwords (argon2id via `pwdlib`) + JWT (HS256), `HTTPBearer` security scheme (Swagger `/docs` shows one "Authorize" button). `get_current_user` **re-reads the user row from the database on every request** and rejects inactive accounts — which is what makes deactivation take effect immediately rather than at token expiry, and why no blacklist is needed. `require_role(*roles)` layers on top, so a role change is also effective on the next request.
 - **File upload:** temp-write → DB commit → atomic move protocol; extension allowlist + magic-byte MIME sniffing; 25MB cap; UUID-based storage paths (never user input).
 - **File download:** no signed-URL scheme needed after all — the BFF proxy's httpOnly-cookie-to-Bearer-header translation already covers plain browser navigation (same-origin request, cookie sent automatically). Corrected an earlier assumption to the contrary; see §9/§10.
 - **Versioning:** row-locked version-number allocation; append-only; restore creates a new version rather than rewriting history.
@@ -761,7 +835,9 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 | Area | Status |
 |---|---|
 | Layout / app shell | ✅ Done — sidebar, topbar, breadcrumb, user menu, theme toggle, responsive mobile drawer |
-| Login | ✅ Done — persona picker (live data) + email form, RHF + Zod |
+| Login | ✅ Done — **email + password** form, RHF + Zod. The persona picker is gone. No length/complexity rule on the login field (that belongs on *set password*; rejecting an attempt as "too short" only reveals what the stored password isn't), and every 401 renders one identical message |
+| Invite / Reset / Forgot password | ✅ Done — `/invite/[token]`, `/reset-password/[token]`, `/forgot-password`. All four failure modes of a dead invite render the same message, matching the API. Accepting redirects to `/login` rather than auto-signing-in |
+| People (Admin) | ✅ Done — one page, **Members** + **Invitations** tabs. Search (debounced, server-side), status filter, paging, inline role dropdown, deactivate with a consequence dialog, reactivate. Own-row actions replaced by a tooltip explaining why. `/admin/invitations` redirects here |
 | Dashboard | ✅ Done — KPIs, category distribution, recently-added/accessed, expiring-soon, role-gated pending-reviews banner, activity feed, all live-data |
 | Upload | ✅ Done — drag-and-drop dropzone, creatable tag input, RHF+Zod metadata form, determinate progress bar (XHR), non-dismissible mid-upload, client-side pre-validation, topbar button wired |
 | Explorer | ✅ Done — URL-driven filters (search/category/review-status/tags/sort), table + mobile list, pagination, empty/error/loading states, topbar search wired up |
@@ -907,6 +983,7 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 
 ### Open
 
+- **One Supabase Postgres serves both local development and production.** `backend/.env` points at the same instance Railway uses. Three consequences, one of which has already bitten: (1) running `alembic upgrade head` locally migrates production, and if the deployed branch lacks that revision the API crash-loops — this happened for real on 2026-07-28 with revision `3711e1bdb61b`; (2) there is nowhere safe to try a destructive change; (3) the test suite runs against production data, which is only safe because the harness rolls every test back inside a transaction (verified to leave zero rows, and re-verified after the 178-test run on 2026-07-28). The fix is a second Supabase project for local work. Until then, the rule is: **merge and deploy the code before, or at the same time as, migrating.** Now item 1 in §11.
 - **Production is 4–15× slower than local, and the cause is measured, not guessed.** Live timings from outside: `/health` (no DB) **0.47s**, `/auth/users` (1 query) **1.30s**, `/documents` (~3 queries) **3.2s**, `/dashboard/summary` **7.1s**. Latency scales *linearly with query count*, which rules out a slow container (that would slow `/health` too, without scaling) and points squarely at per-round-trip cost. Two causes multiply:
   1. **The app is far from the database.** Supabase is in Mumbai (`ap-south-1`); the Railway service is not — Railway defaults new services to a US region unless one is chosen. Measured: the identical query takes **20ms from a laptop in India** but **~330ms from Railway**. Railway has no Mumbai region, so Singapore (`asia-southeast1`) is the closest available (~70ms to Mumbai) — that alone should be roughly a 4× improvement and is a settings change, not a code change. Genuinely fixing it means moving the Supabase project to Singapore too (Supabase can't relocate in place — it needs a new project plus a data migration), which would get both to ~5ms.
   2. **`GET /dashboard/summary` issues 21 separate SQL statements** (instrumented via a SQLAlchemy `before_cursor_execute` listener, not estimated). Survivable at 20ms/query (910ms — already sluggish); catastrophic at 330ms (≈7s). Worth collapsing regardless of region, since 21 sequential round trips is a wasteful way to build one page at *any* latency.
@@ -915,7 +992,7 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 
 - ~~**No `GEMINI_API_KEY` was configured**~~ — resolved: a real key was provided and added to `.env`, live end-to-end verified (see Change Log). `gemini-2.0-flash` returned `429 RESOURCE_EXHAUSTED` (`limit: 0` on this project's free tier for that specific model) — switched the default model to `gemini-2.5-flash`, which worked at the time. **Superseded 2026-07-25**: the default is now `gemini-flash-latest` (an alias Google repoints as models are retired), currently resolving to `gemini-3.6-flash`. Confirmed live that `gemini-2.5-flash` itself now returns `404 — "no longer available to new users"`, i.e. the pinned model this entry recommended has since been retired while the alias kept working straight through it. That's the deliberate reason for preferring the alias here: a pinned model dying silently is a worse failure mode for this app than an unannounced model upgrade, since nothing monitors it and the output is Pydantic-validated and only ever shown as an accept-or-ignore suggestion. **Minor open item** (originally attributed to `gemini-2.5-flash`, not re-checked against the current model): structured-JSON output occasionally corrupts an em-dash (`—`) inside a generated `title` into a stray `\", \"` sequence — reproduced directly against the raw API, so it's a model-side structured-decoding quirk for that specific character, not a bug in our JSON parsing (the JSON itself is valid; Pydantic validates it fine) and not something our code can reliably prevent. Doesn't crash anything — worst case is a slightly garbled suggested title, which is display-only until a user explicitly clicks Accept. Only seen so far in one PPTX test document; not seen in the real live demo document (a plain-text HR policy) or other test documents.
 - **The AI worker has no supervisor and isn't started automatically.** `app/ai_jobs/main.py` needs to be run as its own long-lived process (`uv run python -m app.ai_jobs.main`) alongside the API and frontend dev servers; nothing restarts it if it crashes or the machine reboots, and `uvicorn`/`next dev` starting up doesn't imply it's running. If it's down, extraction jobs simply queue up unprocessed — no error surfaces anywhere in the UI (by design, per the graceful-degradation pattern), which makes this specific failure mode easy to miss. Confirmed as the root cause of a real "the badge never clears" report during this session. Acceptable for local dev; would need a real process manager (systemd/supervisor/a container sidecar) before any actual deployment.
-- ~~**No automated test suite.**~~ — **backend API flows are now covered (80 tests); the frontend still has none.** `tests/api/` covers auth, upload/search/edit/permissions, versioning (upload/list/download/restore), reviews, trash/hard-delete, and one full-lifecycle integration test, against the real Postgres schema (see §9 for the transaction-rollback strategy). Still open: the frontend has no component/E2E tests at all — verification there remains ad hoc Playwright scripts in the session scratchpad, not checked into the repo.
+- ~~**No automated test suite.**~~ — **backend API flows are now covered (178 tests as of 2026-07-28); the frontend still has none.** `tests/api/` covers auth, upload/search/edit/permissions, versioning (upload/list/download/restore), reviews, trash/hard-delete, and one full-lifecycle integration test, against the real Postgres schema (see §9 for the transaction-rollback strategy). Still open: the frontend has no component/E2E tests at all — verification there remains ad hoc Playwright scripts in the session scratchpad, not checked into the repo.
 - **Dashboard's "Recently Accessed" widget shows `updatedAt`, not a true "last accessed" timestamp.** `GET /dashboard/summary` returns `DocumentSummary` objects, which don't include `lastAccessedAt` (only `DocumentDetail` does, via the document-detail endpoint). Not worth a backend schema change for one dashboard widget's label right now — revisit if it's noticeably confusing in practice.
 - **Upload progress reflects the browser→Next.js leg only, not Next.js→FastAPI.** The BFF proxy buffers the full response before returning it, so true end-to-end progress isn't observable from the client — acceptable on localhost where that second leg is fast; worth revisiting if the backend is ever deployed somewhere with meaningfully higher latency between the two.
 - **Search doesn't cover document body text.** `search_vector` indexes title, description, tags, category name, and current filename — not the actual PDF/DOCX content (FR-22, deferred).
@@ -938,11 +1015,15 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 
 **Deployment is done** — the app is live on Railway (API + AI worker, from one Dockerfile) and Vercel (frontend), with Supabase for the database and file storage. That also resolved the long-standing "the worker has no supervisor" gap: Railway restarts it on crash, which is what a real process manager was needed for.
 
+**Authentication is done** — real passwords, invite-only accounts, password reset, transactional email, and admin user management (deactivate / reactivate / change role) are all live and verified in production.
+
 What's left:
 
-1. **Fix production latency (highest priority — see §10).** The deployed app is 4–15× slower than local, measured: `/health` 0.47s, one query 1.3s, the dashboard **7.1s**. Diagnosed, not guessed — latency scales linearly with query count, so it's per-round-trip cost, not a slow container.
-2. **Phase 6 (Testing) — backend half is done** (109 tests: the `pytest` API suite *and* the full upload→version→search→download integration test the roadmap asked for; see §3 and §9). Still outstanding: **frontend tests** (nothing at all today) and the scripted demo walkthrough exercising each of the six pains from the original brief in order (§19.7).
-3. **A CI workflow.** Every push to `develop` deploys straight to production with no gate — the 109 tests only run if someone remembers to run them locally.
+1. **Separate the local and production databases (new, and arguably now the highest priority).** One Supabase Postgres currently serves both, which on 2026-07-28 turned a routine local migration into a production outage — see the warning at the top of this document. It also means there is nowhere safe to try anything destructive. A second Supabase project for local work would make this class of incident impossible.
+2. **Fix production latency (see §10).** The deployed app is 4–15× slower than local, measured: `/health` 0.47s, one query 1.3s, the dashboard **7.1s**. Diagnosed, not guessed — latency scales linearly with query count, so it's per-round-trip cost, not a slow container. Two known contributors: the Railway region is far from the Supabase region, and `/dashboard/summary` issues 21 SQL statements.
+3. **A CI workflow.** Every push to `develop` deploys straight to production with no gate — the 178 tests only run if someone remembers to run them locally. Given item 1, a green-tests gate is the cheapest protection available right now.
+4. **Frontend tests** — still nothing at all. Verification today is `tsc` + `eslint` + a production build + driving the running app by hand. Also outstanding: the scripted demo walkthrough exercising each of the six pains from the original brief in order (§19.7).
+5. **Delete or ignore the `main` branch.** Vercel's production branch is now `develop`; `main` is ~16 commits behind and nothing depends on it.
 
 Ask before starting, per standing practice.
 
@@ -962,7 +1043,7 @@ Ask before starting, per standing practice.
 - Real notification delivery (email/in-app) for review reminders — currently only the data + visibility half is built
 - Approval workflows / formal document states (Draft → In Review → Approved → Retired)
 - Granular ACLs and per-recipient access control — *external share links themselves are built* (see §3); what remains is finer-grained permissions than "anyone with the link"
-- Full role & permission administration UI
+- ~~Full role & permission administration UI~~ — **partly built 2026-07-28**: the People page now covers deactivate / reactivate / change role with search and paging. What remains is genuinely *granular* permissions (per-document or per-category ACLs), not user administration
 - SSO / OIDC / SAML
 - Multi-tenancy, retention policies, legal hold
 
@@ -971,6 +1052,16 @@ Ask before starting, per standing practice.
 ## 13. Change Log
 
 *(Reverse chronological. Never delete history — always append.)*
+
+### 2026-07-28
+
+- **Replaced mock authentication with real invite-only password auth, in four phases, each verified live before the next started.** Decisions taken up front: invite-only (no open signup), Resend for email, demo accounts kept with a known password. Phase 1 — argon2id password login, timing-equalised so a wrong email and a wrong password take the same time, with one error message for every failure mode. Phase 2 — `invitations` table storing only a token hash; the raw token is returned exactly once so the admin can copy the link, and accepting deliberately doesn't create a session. Phase 3 — `EmailSender` port with Resend and logging adapters, sends best-effort so a provider failure can't destroy a committed invitation. Phase 4 — login, accept-invite, forgot/reset password screens plus `PUBLIC_PATHS`/`SHARED_PATHS` in `proxy.ts` and a `/api/public/[...path]` route that never reads the session cookie. Full detail in §3.
+- **Built admin user management: deactivate, reactivate, change role, with search and paging.** Analysis first, per request. The finding that shaped it: `get_current_user` already re-reads the user row on every request, so flipping `is_active` revokes a still-valid 24-hour token on the *next click* — the expensive part of revocation was already built, and only the switch was missing. Deactivation rather than deletion because eleven FKs point at `users` and two make deletion impossible in practice (`documents.owner_id` is `ON DELETE RESTRICT`; `activity_events`/`document_versions` would lose real history). Two guards in the service — no deactivating or demoting yourself, none on the last active admin. Merged as one **People** page with Members + Invitations tabs. 28 new tests (178 total).
+- **Closed a real security gap found while planning that feature: a deactivated user's share links kept working.** `ShareLinkRepository.get_usable_by_token_hash` checked expiry and revocation but never the creator's status, so someone cut off in the morning still had every link they'd ever sent serving company documents. Now joined and filtered in the same query as the other two conditions, so no endpoint can forget it. Deactivation also consumes outstanding password-reset tokens.
+- **Production outage, self-inflicted, worth not repeating: Railway crash-looped on `Can't locate revision identified by '3711e1bdb61b'`.** Root cause was not the Resend key added minutes earlier, despite the timing — local development and production share **one** Supabase database, so testing auth locally had already migrated production to a revision that `develop` didn't yet contain. Alembic reads the DB, looks for that revision in the deployed code, finds nothing, and dies. Fixed by merging the auth branch to `develop`; the DB was already at head so the upgrade became a no-op. Recorded as a standing warning at the top of this document, and separating the two databases is now item 1 in §11.
+- **Corrected a test that asserted something impossible.** A test for "the last active admin can't be deactivated" was written and then found to be unreachable: a caller must be an active admin to pass `require_role`, so if the target is the last one the caller *is* the target and the self-check fires first. Rather than leave a test that appeared to prove something it couldn't, the guard's coverage moved to the service level (where a script or CLI could reach it) and the API-level test now asserts the invariant that genuinely protects the workspace.
+- **Vercel was serving a 16-commit-old frontend the whole time.** Its Production Branch was still `main` while GitHub's default and every deploy had moved to `develop`, so pushes built as previews and the live site never changed. Diagnosed by probing `/forgot-password`, which redirected to `/login` — behaviour only the *old* `proxy.ts` had. Fixed by repointing Vercel at `develop`.
+- **Verified email delivery end to end against Resend's own log** rather than trusting the API's deliberately neutral 202: `from=noreply@ymgsolution.com`, `status=delivered`. The same log also confirmed the test suite's `@test.docbrain` fixture address bounces, as expected for a reserved-looking TLD.
 
 ### 2026-07-27
 
