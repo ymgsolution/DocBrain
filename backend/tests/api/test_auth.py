@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from app.core.passwords import hash_password
 from app.db.models import User
-from tests.conftest import TEST_PASSWORD
+from tests.constants import TEST_PASSWORD
 
 
 def _login(client: TestClient, email: str, password: str):
@@ -90,8 +90,10 @@ def test_the_user_list_now_requires_a_session(client: TestClient, auth, employee
 
 
 def test_passwords_are_hashed_not_stored(db_session, employee: User) -> None:
-    assert employee.password_hash != TEST_PASSWORD
-    assert employee.password_hash.startswith("$argon2")
+    stored = employee.password_hash
+    assert stored is not None
+    assert stored != TEST_PASSWORD
+    assert stored.startswith("$argon2")
 
 
 def test_the_same_password_hashes_differently_each_time() -> None:
