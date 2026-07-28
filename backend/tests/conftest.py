@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.models import Category, User
+from app.core.passwords import hash_password
 from app.db.models.enums import UserRole
 from app.main import app
 from app.modules.documents.repository import DocumentRepository
@@ -41,6 +42,10 @@ from app.modules.shares.router import get_share_service
 from app.modules.shares.service import ShareService
 from app.modules.versions.service import VersionService
 from app.storage.local_adapter import LocalFileSystemStorage
+
+# Every test user shares this; individual tests that care about wrong
+# passwords pass something else explicitly.
+TEST_PASSWORD = "Test@123"
 
 # The app's own logging config sets INFO, which makes httpx narrate every
 # single test request. Tests are noisy enough without it.
@@ -117,6 +122,7 @@ def make_user(db_session: Session):
             display_name=f"Test {role.value.title()} {suffix}",
             role=role,
             is_active=True,
+            password_hash=hash_password(TEST_PASSWORD),
         )
         db_session.add(user)
         db_session.flush()
@@ -167,7 +173,9 @@ def auth(client: TestClient):
     verified on every subsequent request) rather than forging a header."""
 
     def _headers(user: User) -> dict[str, str]:
-        response = client.post("/api/v1/auth/login", json={"email": user.email})
+        response = client.post(
+            "/api/v1/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
+        )
         assert response.status_code == 200, response.text
         return {"Authorization": f"Bearer {response.json()['token']}"}
 

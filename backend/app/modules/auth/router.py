@@ -17,13 +17,24 @@ def get_auth_service(db: Session = Depends(get_db_session)) -> AuthService:
 
 
 @router.get("/users", response_model=list[UserSummary])
-def list_users(service: AuthService = Depends(get_auth_service)) -> list[User]:
+def list_users(
+    service: AuthService = Depends(get_auth_service),
+    current_user: User = Depends(get_current_user),
+) -> list[User]:
+    """Colleague directory — powers the "owner" filter on Pending Reviews.
+
+    The `get_current_user` dependency is the point of this endpoint's
+    existence in its current form: it previously had none, so anyone on the
+    internet could enumerate every user's name, email and role. Signed-in
+    colleagues seeing each other is normal for a shared workspace; strangers
+    harvesting the staff list is not.
+    """
     return service.list_personas()
 
 
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, service: AuthService = Depends(get_auth_service)) -> TokenResponse:
-    token, expires_at, user = service.login(payload.email)
+    token, expires_at, user = service.login(payload.email, payload.password)
     return TokenResponse(token=token, expires_at=expires_at, user=UserSummary.model_validate(user))
 
 

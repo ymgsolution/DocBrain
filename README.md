@@ -227,6 +227,20 @@ cd backend && docker build -t docbrain-api .
 docker run -p 8100:8100 -e PORT=8100 --env-file .env docbrain-api
 ```
 
+## Demo accounts
+
+Accounts are invite-only. The seeded demo users all share the password
+**`Test@123`** — deliberate and published, because they're demo identities
+in a portfolio project, not real accounts:
+
+| Email | Role |
+|---|---|
+| `priya@docbrain.dev` | Employee |
+| `rahul@docbrain.dev` | Reviewer |
+| `anita@docbrain.dev` | Admin |
+
+Re-apply with `uv run python -m scripts.set_demo_passwords`.
+
 ## Tests
 
 ```bash

@@ -23,6 +23,11 @@ class User(Base):
         Enum(UserRole, name="user_role", values_callable=lambda e: [m.value for m in e]),
         nullable=False,
     )
+    # Nullable on purpose: an invited user exists (so their role and any
+    # assigned documents are real) before they've ever set a password. Until
+    # they accept the invite this stays NULL and verify_password rejects
+    # every attempt, so a pending invite can't be logged into.
+    password_hash: Mapped[str | None] = mapped_column(String, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
