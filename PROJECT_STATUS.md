@@ -1,10 +1,10 @@
 # DocBrain Project Status
 
-**Live:** frontend https://doc-brain-xi.vercel.app · API https://docbrain-production-00e4.up.railway.app
+**Live:** API https://docbrain-production-00e4.up.railway.app (verified) · frontend on a custom domain — the original `doc-brain-xi.vercel.app` now 404s, so update this line with the current domain. `PUBLIC_APP_URL` on **both** Railway services must match it, or generated share links point at the wrong host.
 
 > **This is the single source of truth for the project.** It must be updated whenever a feature is added, modified, refactored, removed, or completed. See [Important Rules](#important-rules) at the bottom.
 
-**Last updated:** 2026-07-24 (AI Phase 2 foundation: `app/ai/` provider abstraction, prompt registry, and the first real AI capability — Gemini metadata generation — built and wired end-to-end in shadow mode. No Gemini API key configured yet, so nothing has actually called the model live; the worker gracefully runs extraction-only until one is set)
+**Last updated:** 2026-07-27 (external share links built and merged; app deployed to Railway + Vercel + Supabase; backend API test suite at 109 tests). See §13 Change Log for the full sequence.
 
 ---
 
@@ -673,6 +673,7 @@ DocBrain/
 | `ai_jobs` | *(AI feature track)* Shared background-work queue — `job_type`/`status`/`attempt_count`/`next_retry_at`. Designed for reuse by every future AI stage (extraction, metadata generation, and embeddings today; more later), not extraction-specific. `job_type` now has three values: `EXTRACT`, `GENERATE_METADATA`, `GENERATE_EMBEDDING`. |
 | `ai_document_analysis` | *(AI feature track, Phase 2, shadow mode)* One row per `document_version_id` (unique FK, CASCADE). Named `analysis`, not `metadata`, so future AI outputs (summaries, entities, topics, compliance results) can land as additive nullable columns without renaming the table again. Holds the validated `suggested_*`/`confidence_score` fields, the provider's `raw_response`, full per-execution observability (model/prompt version/tokens/latency/retries), and nullable review fields (`accepted`/`accepted_by`/`accepted_at`/`edited`) for a review UI that doesn't exist yet. Nothing reads this table from any user-facing response. |
 | `document_vector_embeddings` | *(AI feature track — Similar Document Detection)* One row per `document_version_id` (unique FK, CASCADE). Kept fully separate from `ai_document_analysis` — a 768-dim `pgvector` column (`gemini-embedding-001`, `task_type=SEMANTIC_SIMILARITY`), plus `embedding_model`/`embedding_dimension` and the same job-observability columns (`status`, `error_message`, `retry_count`, `latency_ms`, `generated_at`, `input_char_count`) `ai_document_analysis` has. Powers `GET /documents/{id}/similar` today; designed to also back Duplicate Detection and Semantic Search later without a new table. |
+| `share_links` | *(External sharing)* One row per issued link. Stores only a **SHA-256 hash** of the token (never the token itself), the document, the **pinned** `document_version_id`, `expires_at`, `revoked_at`, plus `view_count`/`last_viewed_at`. Backs the app's only unauthenticated read path — see §3. Both FKs cascade, so hard-deleting a document takes its links with it and can't leave a live link pointing at content that no longer exists. |
 
 ### Relationships
 
@@ -906,6 +907,12 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 
 ### Open
 
+- **Production is 4–15× slower than local, and the cause is measured, not guessed.** Live timings from outside: `/health` (no DB) **0.47s**, `/auth/users` (1 query) **1.30s**, `/documents` (~3 queries) **3.2s**, `/dashboard/summary` **7.1s**. Latency scales *linearly with query count*, which rules out a slow container (that would slow `/health` too, without scaling) and points squarely at per-round-trip cost. Two causes multiply:
+  1. **The app is far from the database.** Supabase is in Mumbai (`ap-south-1`); the Railway service is not — Railway defaults new services to a US region unless one is chosen. Measured: the identical query takes **20ms from a laptop in India** but **~330ms from Railway**. Railway has no Mumbai region, so Singapore (`asia-southeast1`) is the closest available (~70ms to Mumbai) — that alone should be roughly a 4× improvement and is a settings change, not a code change. Genuinely fixing it means moving the Supabase project to Singapore too (Supabase can't relocate in place — it needs a new project plus a data migration), which would get both to ~5ms.
+  2. **`GET /dashboard/summary` issues 21 separate SQL statements** (instrumented via a SQLAlchemy `before_cursor_execute` listener, not estimated). Survivable at 20ms/query (910ms — already sluggish); catastrophic at 330ms (≈7s). Worth collapsing regardless of region, since 21 sequential round trips is a wasteful way to build one page at *any* latency.
+  Neither is fixed yet. The region change is the cheaper first move; the query count is the more durable one.
+- **Every push to `develop` deploys straight to production with no gate.** Railway and Vercel both auto-deploy from that branch, and there is no CI, so the 109-test suite only runs when someone remembers to run it locally. Alembic migrations also apply themselves on API start — convenient, but it means a bad migration ships itself.
+
 - ~~**No `GEMINI_API_KEY` was configured**~~ — resolved: a real key was provided and added to `.env`, live end-to-end verified (see Change Log). `gemini-2.0-flash` returned `429 RESOURCE_EXHAUSTED` (`limit: 0` on this project's free tier for that specific model) — switched the default model to `gemini-2.5-flash`, which worked at the time. **Superseded 2026-07-25**: the default is now `gemini-flash-latest` (an alias Google repoints as models are retired), currently resolving to `gemini-3.6-flash`. Confirmed live that `gemini-2.5-flash` itself now returns `404 — "no longer available to new users"`, i.e. the pinned model this entry recommended has since been retired while the alias kept working straight through it. That's the deliberate reason for preferring the alias here: a pinned model dying silently is a worse failure mode for this app than an unannounced model upgrade, since nothing monitors it and the output is Pydantic-validated and only ever shown as an accept-or-ignore suggestion. **Minor open item** (originally attributed to `gemini-2.5-flash`, not re-checked against the current model): structured-JSON output occasionally corrupts an em-dash (`—`) inside a generated `title` into a stray `\", \"` sequence — reproduced directly against the raw API, so it's a model-side structured-decoding quirk for that specific character, not a bug in our JSON parsing (the JSON itself is valid; Pydantic validates it fine) and not something our code can reliably prevent. Doesn't crash anything — worst case is a slightly garbled suggested title, which is display-only until a user explicitly clicks Accept. Only seen so far in one PPTX test document; not seen in the real live demo document (a plain-text HR policy) or other test documents.
 - **The AI worker has no supervisor and isn't started automatically.** `app/ai_jobs/main.py` needs to be run as its own long-lived process (`uv run python -m app.ai_jobs.main`) alongside the API and frontend dev servers; nothing restarts it if it crashes or the machine reboots, and `uvicorn`/`next dev` starting up doesn't imply it's running. If it's down, extraction jobs simply queue up unprocessed — no error surfaces anywhere in the UI (by design, per the graceful-degradation pattern), which makes this specific failure mode easy to miss. Confirmed as the root cause of a real "the badge never clears" report during this session. Acceptable for local dev; would need a real process manager (systemd/supervisor/a container sidecar) before any actual deployment.
 - ~~**No automated test suite.**~~ — **backend API flows are now covered (80 tests); the frontend still has none.** `tests/api/` covers auth, upload/search/edit/permissions, versioning (upload/list/download/restore), reviews, trash/hard-delete, and one full-lifecycle integration test, against the real Postgres schema (see §9 for the transaction-rollback strategy). Still open: the frontend has no component/E2E tests at all — verification there remains ad hoc Playwright scripts in the session scratchpad, not checked into the repo.
@@ -929,10 +936,13 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 
 **Phase 4 (Frontend), Pending Reviews/Trash (S6/S8), and Phase 5 (Integration) are all complete.** Every screen in the architecture doc's §6 screen plan exists, the canonical J2 flow (§4.3) works end-to-end without touching a terminal, and error handling was audited and brought into consistency against §16.5 across every screen (see §3 and §9; residual, deliberately-deferred gaps are in §10 Known Issues → Open).
 
-What's left, per the roadmap (§19):
+**Deployment is done** — the app is live on Railway (API + AI worker, from one Dockerfile) and Vercel (frontend), with Supabase for the database and file storage. That also resolved the long-standing "the worker has no supervisor" gap: Railway restarts it on crash, which is what a real process manager was needed for.
 
-1. **Phase 6 (Testing) — backend half is done** (80 tests: the `pytest` API suite *and* the full upload→version→search→download integration test the roadmap asked for; see §3 and §9). Still outstanding from this phase: **frontend tests** (nothing at all today) and the scripted demo walkthrough exercising each of the six pains from the original brief in order (§19.7).
-2. **Deployment** — the app still only runs locally via `start.py`. Notably, the AI worker has no supervisor (§10), which is the one piece that genuinely needs solving before any real deployment.
+What's left:
+
+1. **Fix production latency (highest priority — see §10).** The deployed app is 4–15× slower than local, measured: `/health` 0.47s, one query 1.3s, the dashboard **7.1s**. Diagnosed, not guessed — latency scales linearly with query count, so it's per-round-trip cost, not a slow container.
+2. **Phase 6 (Testing) — backend half is done** (109 tests: the `pytest` API suite *and* the full upload→version→search→download integration test the roadmap asked for; see §3 and §9). Still outstanding: **frontend tests** (nothing at all today) and the scripted demo walkthrough exercising each of the six pains from the original brief in order (§19.7).
+3. **A CI workflow.** Every push to `develop` deploys straight to production with no gate — the 109 tests only run if someone remembers to run them locally.
 
 Ask before starting, per standing practice.
 
@@ -951,7 +961,7 @@ Ask before starting, per standing practice.
 - **OCR for scanned/image-only PDFs** (currently silently extract to 0 characters, so no AI features run at all) — root-caused against a real failing document and feasibility-tested live with Tesseract (22,631 real characters recovered from a 6-page scan in 9.7s); see §10 Known Issues → Open for the exact plan
 - Real notification delivery (email/in-app) for review reminders — currently only the data + visibility half is built
 - Approval workflows / formal document states (Draft → In Review → Approved → Retired)
-- Granular ACLs, sharing links, external guest access
+- Granular ACLs and per-recipient access control — *external share links themselves are built* (see §3); what remains is finer-grained permissions than "anyone with the link"
 - Full role & permission administration UI
 - SSO / OIDC / SAML
 - Multi-tenancy, retention policies, legal hold
@@ -961,6 +971,14 @@ Ask before starting, per standing practice.
 ## 13. Change Log
 
 *(Reverse chronological. Never delete history — always append.)*
+
+### 2026-07-27
+
+- **Built external share links (view-only, expiring, revocable) — the app's first unauthenticated read path.** Preceded by a 9-part architecture review whose central finding shaped the build: every existing document route requires `get_current_user`, so the rule followed throughout was *never modify an existing endpoint to also accept a share token* — add separate routes instead. That's why all 84 pre-existing tests passed unmodified. Full detail in §3. Merged to `develop` via PR #2.
+- **Two follow-up fixes from real use.** (1) The share page said "view-only" while Chrome's own PDF viewer rendered a download button on top of it — hidden with `#toolbar=0` on the share page only, and *deliberately not overclaimed*: it's friction, not protection, since the bytes must reach the browser to render. (2) The Create-link button sat 8px below its dropdown; measured rather than nudged — the row computed to 62px while the visible trigger ended at 54px, because Base UI's `Select` renders an extra element beneath it, so `items-end` was aligning correctly to an edge nobody can see. Fixed structurally (label above, tops aligned) rather than with a magic margin that would break the next time the component changed.
+- **Added a custom expiry date & time** alongside the day presets, as an optional absolute `expiresAt` that wins when present — so the preset path and its 20 tests were untouched. Both routes share one ceiling check, so "custom" can't sidestep the 90-day limit. 5 new tests (109 total).
+- **Diagnosed why production is slow** (see §10 → Open). Measured rather than assumed: latency scales linearly with query count, the same query costs 20ms from a laptop in India and ~330ms from Railway, and `/dashboard/summary` issues 21 SQL statements. Not yet fixed — the region change is the cheap first move.
+- **Two debugging lessons worth not re-learning.** The custom-expiry feature appeared to ignore the chosen date and fall back to 7 days, which looked exactly like a timezone bug; it wasn't — the local uvicorn had been started before the change and wasn't running with `--reload`, so it served stale code. Isolated by capturing the browser's actual POST body (correct) and then reproducing against the API directly (also wrong). Separately, when the Share button didn't appear on the live site after merging, the cause was Vercel not having deployed while Railway had — confirmed by probing `/share/faketoken`, which still 307'd to `/login` (old `proxy.ts`) while the API's OpenAPI spec already listed all four share routes.
 
 ### 2026-07-25
 
