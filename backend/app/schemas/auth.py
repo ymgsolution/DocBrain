@@ -16,6 +16,18 @@ class UserSummary(CamelModel):
 
 class LoginRequest(CamelModel):
     email: EmailStr
+    # No max/complexity rules on *login* deliberately — those belong on the
+    # set-password path. Rejecting a login for a "too short" password just
+    # leaks that the stored one doesn't look like that.
+    password: str = Field(min_length=1)
+
+
+class PasswordResetRequest(CamelModel):
+    email: EmailStr
+
+
+class PasswordResetConfirm(CamelModel):
+    password: str = Field(min_length=8, max_length=200)
 
 
 class TokenResponse(CamelModel):

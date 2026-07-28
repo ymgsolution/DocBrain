@@ -55,9 +55,10 @@ def test_the_raw_token_is_never_returned_again(client: TestClient, auth, employe
 def test_the_token_is_not_stored_in_readable_form(client: TestClient, auth, employee: User, upload, db_session):
     headers = auth(employee)
     document = upload(headers, title="Contract For Client")
-    token = _create_link(client, headers, document["id"])["token"]
+    created = _create_link(client, headers, document["id"])
+    token = created["token"]
 
-    stored = db_session.query(ShareLink).one()
+    stored = db_session.get(ShareLink, uuid.UUID(created["id"]))
 
     assert stored.token_hash != token
     assert len(stored.token_hash) == 64  # sha256 hex
@@ -108,9 +109,12 @@ def test_shared_content_is_served_inline_and_never_as_a_download(
 def test_an_expired_link_is_rejected(client: TestClient, auth, employee: User, upload, db_session):
     headers = auth(employee)
     document = upload(headers, title="Contract For Client")
-    token = _create_link(client, headers, document["id"])["token"]
+    created = _create_link(client, headers, document["id"])
+    token = created["token"]
 
-    db_session.query(ShareLink).one().expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    link = db_session.get(ShareLink, uuid.UUID(created["id"]))
+    assert link is not None
+    link.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
     db_session.flush()
 
     assert client.get(f"/api/v1/public/shares/{token}").status_code == 404

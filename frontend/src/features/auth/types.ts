@@ -9,6 +9,7 @@ export interface UserSummary {
 
 export interface LoginRequest {
   email: string;
+  password: string;
 }
 
 export type ThemePreference = "light" | "dark" | "system";
