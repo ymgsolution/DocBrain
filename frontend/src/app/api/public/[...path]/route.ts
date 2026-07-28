@@ -7,13 +7,23 @@ import { API_BASE_URL } from "@/lib/constants";
 // opening it happens to have a DocBrain session, so a logged-in user
 // checking their own link sees exactly what their client sees.
 //
-// Only GET is exposed. There is nothing a holder of a share link should be
-// able to write.
+// GET and POST only. POST is needed because two unauthenticated actions
+// genuinely write: accepting an invitation (which creates the account) and
+// completing a password reset. Both are guarded server-side by a
+// single-use, expiring token — see the backend's /public routers.
 async function proxyPublic(request: NextRequest, path: string[]): Promise<NextResponse> {
   const url = new URL(`${API_BASE_URL}/api/v1/public/${path.join("/")}`);
   url.search = request.nextUrl.search;
 
-  const backendResponse = await fetch(url, { method: "GET" });
+  const headers = new Headers();
+  let body: BodyInit | undefined;
+  if (request.method === "POST") {
+    body = await request.text();
+    const contentType = request.headers.get("content-type");
+    if (contentType) headers.set("content-type", contentType);
+  }
+
+  const backendResponse = await fetch(url, { method: request.method, headers, body });
   const isNullBodyStatus = [204, 205, 304].includes(backendResponse.status);
   const responseBody = isNullBodyStatus ? null : await backendResponse.arrayBuffer();
 
@@ -39,5 +49,9 @@ async function proxyPublic(request: NextRequest, path: string[]): Promise<NextRe
 type RouteContext = { params: Promise<{ path: string[] }> };
 
 export async function GET(request: NextRequest, { params }: RouteContext) {
+  return proxyPublic(request, (await params).path);
+}
+
+export async function POST(request: NextRequest, { params }: RouteContext) {
   return proxyPublic(request, (await params).path);
 }

@@ -19,7 +19,7 @@ NEW_PASSWORD = "BrandNewPass1!"
 
 
 def _request(client: TestClient, email: str):
-    return client.post("/api/v1/auth/password-reset", json={"email": email})
+    return client.post("/api/v1/public/auth/password-reset", json={"email": email})
 
 
 def _token_from(emails) -> str:
@@ -33,7 +33,7 @@ def test_a_reset_link_is_emailed_and_works(client: TestClient, employee: User, e
     assert _request(client, employee.email).status_code == 202
 
     token = _token_from(emails)
-    assert client.post(f"/api/v1/auth/password-reset/{token}", json={"password": NEW_PASSWORD}).status_code == 204
+    assert client.post(f"/api/v1/public/auth/password-reset/{token}", json={"password": NEW_PASSWORD}).status_code == 204
 
     # the new password works...
     assert client.post(
@@ -71,8 +71,8 @@ def test_a_reset_token_works_only_once(client: TestClient, employee: User, email
     _request(client, employee.email)
     token = _token_from(emails)
 
-    assert client.post(f"/api/v1/auth/password-reset/{token}", json={"password": NEW_PASSWORD}).status_code == 204
-    second = client.post(f"/api/v1/auth/password-reset/{token}", json={"password": "YetAnother1!"})
+    assert client.post(f"/api/v1/public/auth/password-reset/{token}", json={"password": NEW_PASSWORD}).status_code == 204
+    second = client.post(f"/api/v1/public/auth/password-reset/{token}", json={"password": "YetAnother1!"})
 
     assert second.status_code == 404
 
@@ -88,10 +88,10 @@ def test_requesting_again_invalidates_the_previous_link(client: TestClient, empl
     assert first_token != second_token
 
     assert client.post(
-        f"/api/v1/auth/password-reset/{first_token}", json={"password": NEW_PASSWORD}
+        f"/api/v1/public/auth/password-reset/{first_token}", json={"password": NEW_PASSWORD}
     ).status_code == 404
     assert client.post(
-        f"/api/v1/auth/password-reset/{second_token}", json={"password": NEW_PASSWORD}
+        f"/api/v1/public/auth/password-reset/{second_token}", json={"password": NEW_PASSWORD}
     ).status_code == 204
 
 
@@ -106,12 +106,12 @@ def test_an_expired_token_is_rejected(client: TestClient, db_session, employee: 
     db_session.flush()
 
     assert client.post(
-        f"/api/v1/auth/password-reset/{token}", json={"password": NEW_PASSWORD}
+        f"/api/v1/public/auth/password-reset/{token}", json={"password": NEW_PASSWORD}
     ).status_code == 404
 
 
 def test_an_unknown_token_is_rejected(client: TestClient):
-    response = client.post("/api/v1/auth/password-reset/never-issued", json={"password": NEW_PASSWORD})
+    response = client.post("/api/v1/public/auth/password-reset/never-issued", json={"password": NEW_PASSWORD})
     assert response.status_code == 404
 
 
@@ -119,10 +119,10 @@ def test_a_weak_new_password_is_rejected(client: TestClient, employee: User, ema
     _request(client, employee.email)
     token = _token_from(emails)
 
-    assert client.post(f"/api/v1/auth/password-reset/{token}", json={"password": "short"}).status_code == 422
+    assert client.post(f"/api/v1/public/auth/password-reset/{token}", json={"password": "short"}).status_code == 422
     # the token survives a typo
     assert client.post(
-        f"/api/v1/auth/password-reset/{token}", json={"password": NEW_PASSWORD}
+        f"/api/v1/public/auth/password-reset/{token}", json={"password": NEW_PASSWORD}
     ).status_code == 204
 
 
@@ -144,7 +144,7 @@ def test_resetting_does_not_create_a_session(client: TestClient, employee: User,
     _request(client, employee.email)
     token = _token_from(emails)
 
-    response = client.post(f"/api/v1/auth/password-reset/{token}", json={"password": NEW_PASSWORD})
+    response = client.post(f"/api/v1/public/auth/password-reset/{token}", json={"password": NEW_PASSWORD})
 
     assert response.status_code == 204
     assert not response.cookies
@@ -165,5 +165,5 @@ def test_requesting_a_reset_needs_no_session(client: TestClient, employee: User)
 
 
 def test_an_unrelated_uuid_is_not_a_token(client: TestClient):
-    response = client.post(f"/api/v1/auth/password-reset/{uuid.uuid4()}", json={"password": NEW_PASSWORD})
+    response = client.post(f"/api/v1/public/auth/password-reset/{uuid.uuid4()}", json={"password": NEW_PASSWORD})
     assert response.status_code == 404

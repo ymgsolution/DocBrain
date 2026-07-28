@@ -5,6 +5,7 @@ from app.core.config import get_settings
 from app.core.error_handlers import register_exception_handlers
 from app.core.logging import configure_logging
 from app.core.middleware import CorrelationIdMiddleware
+from app.modules.auth.public_router import router as public_auth_router
 from app.modules.auth.router import router as auth_router
 from app.modules.dashboard.router import router as dashboard_router
 from app.modules.documents.router import router as documents_router
@@ -33,6 +34,7 @@ app.add_middleware(
 register_exception_handlers(app)
 
 app.include_router(auth_router)
+app.include_router(public_auth_router)
 app.include_router(documents_router)
 app.include_router(versions_router)
 app.include_router(taxonomy_router)
