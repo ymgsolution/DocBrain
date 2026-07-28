@@ -6,7 +6,7 @@ import {
   Settings,
   Tags,
   Trash2,
-  UserPlus,
+  Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { UserRole } from "@/types/api";
@@ -32,7 +32,9 @@ export const PRIMARY_NAV: NavItem[] = [
 ];
 
 export const ADMIN_NAV: NavItem[] = [
-  { label: "Invitations", href: "/admin/invitations", icon: UserPlus, roles: ["ADMIN"] },
+  // Members and invitations are two halves of one job (who's in the
+  // workspace), so they're tabs on one page rather than two nav entries.
+  { label: "People", href: "/admin/people", icon: Users, roles: ["ADMIN"] },
   { label: "Categories", href: "/admin/categories", icon: FolderTree, roles: ["ADMIN"] },
   { label: "Tags", href: "/admin/tags", icon: Tags, roles: ["ADMIN"] },
 ];
