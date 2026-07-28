@@ -149,7 +149,7 @@ npm run dev
 
 ### 8. Open the app
 
-Go to **http://localhost:3000**. There's no signup/password — pick any seeded persona from the login screen to sign in.
+Go to **http://localhost:3000** and sign in with one of the [demo accounts](#demo-accounts) — e.g. `anita@docbrain.dev` / `Test@123`. Accounts are invite-only, so there's no public signup form.
 
 ## Demo Flow
 
