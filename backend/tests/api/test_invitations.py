@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 
 from app.db.models import Invitation, User
+from app.email.port import EmailError
 from tests.constants import TEST_PASSWORD
 
 NEW_PASSWORD = "AnotherGood1!"
@@ -226,3 +227,33 @@ def test_an_invited_user_cannot_log_in_before_accepting(client: TestClient, auth
         json={"email": "new.joiner@test.docbrain", "password": TEST_PASSWORD},
     )
     assert response.status_code == 401
+
+
+def test_an_invitation_email_is_sent(client: TestClient, auth, admin: User, emails):
+    created = _invite(client, auth(admin))
+
+    assert len(emails.sent) == 1
+    message = emails.sent[0]
+    assert message["to"] == "new.joiner@test.docbrain"
+    # The link must appear in *both* bodies — some clients render only text,
+    # and an unclickable blob of markup is a support request waiting to happen.
+    assert created["url"] in message["html"]
+    assert created["url"] in message["text"]
+    assert admin.display_name in message["text"]
+
+
+def test_a_failing_email_does_not_fail_the_invitation(client: TestClient, auth, admin: User, emails):
+    """The row is already committed and the admin has the link in the
+    response. Raising here would destroy a valid invitation over a provider
+    problem — and block re-inviting, since a pending invite is a duplicate."""
+
+    def explode(**kwargs):
+        raise EmailError("Resend is down")
+
+    emails.send = explode
+
+    created = _invite(client, auth(admin))
+
+    assert created["status"] == "pending"
+    # ...and the link still works for the recipient
+    assert client.get(f"/api/v1/public/invitations/{created['token']}").status_code == 200

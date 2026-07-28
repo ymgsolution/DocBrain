@@ -22,6 +22,14 @@ class LoginRequest(CamelModel):
     password: str = Field(min_length=1)
 
 
+class PasswordResetRequest(CamelModel):
+    email: EmailStr
+
+
+class PasswordResetConfirm(CamelModel):
+    password: str = Field(min_length=8, max_length=200)
+
+
 class TokenResponse(CamelModel):
     token: str
     expires_at: datetime

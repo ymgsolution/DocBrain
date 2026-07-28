@@ -38,6 +38,14 @@ class Settings(BaseSettings):
     # generated links will point at localhost.
     public_app_url: str = "http://localhost:3000"
 
+    # Transactional email (invitations, password resets). An empty
+    # resend_api_key is a supported configuration, not a broken one: the
+    # app falls back to logging the email instead of sending it, so local
+    # development and CI need no credentials and invitations still work via
+    # the copy-the-link flow. See app/email/.
+    resend_api_key: str = ""
+    email_from: str = "DocBrain <onboarding@resend.dev>"
+
     # AI feature track — empty gemini_api_key means the metadata-generation
     # handler is simply not registered by app/ai_jobs/main.py (extraction
     # keeps working either way; see AIProvider/GeminiProvider).
