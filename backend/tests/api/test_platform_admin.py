@@ -244,7 +244,7 @@ def test_new_organization_starts_with_default_categories_only_visible_to_it(
 
 
 def test_default_categories_have_a_review_period_so_marking_reviewed_advances_the_due_date(
-    client: TestClient, platform_admin: PlatformAdmin
+    client: TestClient, platform_admin: PlatformAdmin, today: date
 ) -> None:
     """Regression test for the reported bug: reviewing a document under a
     new organization's default category must genuinely move its due date
@@ -274,7 +274,11 @@ def test_default_categories_have_a_review_period_so_marking_reviewed_advances_th
     general = next(c for c in categories if c["name"] == "General")
     assert general["defaultReviewPeriodDays"] == 180
 
-    due_soon_date = (date.today() + timedelta(days=10)).isoformat()
+    # `today` (UTC), not date.today() (machine-local): the app computes review
+    # dates in UTC, so in any timezone ahead of UTC the two disagree for the
+    # first hours of the day and this test fails on the date arithmetic alone.
+    # See the `today` fixture in conftest.py.
+    due_soon_date = (today + timedelta(days=10)).isoformat()
     upload = client.post(
         "/api/v1/documents",
         headers=new_org_headers,
@@ -289,7 +293,7 @@ def test_default_categories_have_a_review_period_so_marking_reviewed_advances_th
     assert reviewed.status_code == 200, reviewed.text
     new_due_date = reviewed.json()["reviewDueDate"]
     assert new_due_date != due_soon_date, "review_due_date must advance, not stay on the pre-review date"
-    assert new_due_date == (date.today() + timedelta(days=180)).isoformat()
+    assert new_due_date == (today + timedelta(days=180)).isoformat()
 
 
 def test_cannot_create_second_first_admin_with_duplicate_email(
