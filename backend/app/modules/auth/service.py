@@ -37,7 +37,7 @@ class AuthService:
         if user is None or not user.is_active or not user.password_hash or not password_ok:
             raise UnauthorizedError("That email and password don't match an account.")
 
-        token, expires_at = create_access_token(user.id, user.role.value)
+        token, expires_at = create_access_token(user.id, user.role.value, user.organization_id)
         return token, expires_at, user
 
     def get_preferences(self, user: User) -> UserPreference:

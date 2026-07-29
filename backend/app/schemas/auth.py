@@ -7,11 +7,20 @@ from app.db.models.enums import ThemePreference, UserRole
 from app.schemas.base import CamelModel
 
 
+class OrganizationSummary(CamelModel):
+    id: uuid.UUID
+    name: str
+    slug: str
+
+
 class UserSummary(CamelModel):
     id: uuid.UUID
     display_name: str
     email: str
     role: UserRole
+    # Nullable until Phase 4 makes organization_id required on every user —
+    # see docs/MULTI-TENANT-ARCHITECTURE-REVIEW.md.
+    organization: OrganizationSummary | None = None
 
 
 class LoginRequest(CamelModel):
