@@ -6,7 +6,7 @@
 
 > **This is the single source of truth for the project.** It must be updated whenever a feature is added, modified, refactored, removed, or completed. See [Important Rules](#important-rules) at the bottom.
 
-**Last updated:** 2026-07-28 (real invite-only authentication in four phases; admin user management with deactivate/reactivate/role changes; share-link revocation gap closed; backend suite at 178 tests). See §13 Change Log for the full sequence.
+**Last updated:** 2026-07-29 (Railway moved to Singapore — dashboard 7.1s → 1.85s; three infrastructure items reviewed and deferred by decision). Previously 2026-07-28: real invite-only authentication in four phases, admin user management, share-link revocation gap closed, backend suite at 178 tests. See §13 Change Log for the full sequence.
 
 ---
 
@@ -983,11 +983,22 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 
 ### Open
 
-- **One Supabase Postgres serves both local development and production.** `backend/.env` points at the same instance Railway uses. Three consequences, one of which has already bitten: (1) running `alembic upgrade head` locally migrates production, and if the deployed branch lacks that revision the API crash-loops — this happened for real on 2026-07-28 with revision `3711e1bdb61b`; (2) there is nowhere safe to try a destructive change; (3) the test suite runs against production data, which is only safe because the harness rolls every test back inside a transaction (verified to leave zero rows, and re-verified after the 178-test run on 2026-07-28). The fix is a second Supabase project for local work. Until then, the rule is: **merge and deploy the code before, or at the same time as, migrating.** Now item 1 in §11.
-- **Production is 4–15× slower than local, and the cause is measured, not guessed.** Live timings from outside: `/health` (no DB) **0.47s**, `/auth/users` (1 query) **1.30s**, `/documents` (~3 queries) **3.2s**, `/dashboard/summary` **7.1s**. Latency scales *linearly with query count*, which rules out a slow container (that would slow `/health` too, without scaling) and points squarely at per-round-trip cost. Two causes multiply:
+- **One Supabase Postgres serves both local development and production.** `backend/.env` points at the same instance Railway uses. Three consequences, one of which has already bitten: (1) running `alembic upgrade head` locally migrates production, and if the deployed branch lacks that revision the API crash-loops — this happened for real on 2026-07-28 with revision `3711e1bdb61b`; (2) there is nowhere safe to try a destructive change; (3) the test suite runs against production data, which is only safe because the harness rolls every test back inside a transaction (verified to leave zero rows, and re-verified after the 178-test run on 2026-07-28). The fix is a second Supabase project for local work. **Deferred by decision 2026-07-29** — until then the rule is: **merge and deploy the code before, or at the same time as, migrating.** That workaround is a discipline, not a guarantee; see §11 for when to revisit.
+- **Production latency — half fixed (region moved), half deferred (query count). The cause was measured, not guessed, and the fix confirmed the measurement.** *Original 2026-07-27 finding, kept for the reasoning:* production was 4–15× slower than local — `/health` (no DB) **0.47s**, `/auth/users` (1 query) **1.30s**, `/documents` (~3 queries) **3.2s**, `/dashboard/summary` **7.1s**. Latency scaled *linearly with query count*, which ruled out a slow container (that would slow `/health` too, without scaling) and pointed squarely at per-round-trip cost. Two causes multiplied:
   1. **The app is far from the database.** Supabase is in Mumbai (`ap-south-1`); the Railway service is not — Railway defaults new services to a US region unless one is chosen. Measured: the identical query takes **20ms from a laptop in India** but **~330ms from Railway**. Railway has no Mumbai region, so Singapore (`asia-southeast1`) is the closest available (~70ms to Mumbai) — that alone should be roughly a 4× improvement and is a settings change, not a code change. Genuinely fixing it means moving the Supabase project to Singapore too (Supabase can't relocate in place — it needs a new project plus a data migration), which would get both to ~5ms.
   2. **`GET /dashboard/summary` issues 21 separate SQL statements** (instrumented via a SQLAlchemy `before_cursor_execute` listener, not estimated). Survivable at 20ms/query (910ms — already sluggish); catastrophic at 330ms (≈7s). Worth collapsing regardless of region, since 21 sequential round trips is a wasteful way to build one page at *any* latency.
-  Neither is fixed yet. The region change is the cheaper first move; the query count is the more durable one.
+  **Update 2026-07-29 — cause 1 is fixed, and the diagnosis held.** The Railway service was moved to Singapore. Re-measured against the same four endpoints (best of 3, to discount cold starts):
+
+  | Endpoint | Before | After | Change |
+  |---|---|---|---|
+  | `/health` (no DB) | 0.47s | **0.23s** | 2.0× |
+  | `/auth/users` (1 query) | 1.30s | **0.49s** | 2.7× |
+  | `/documents` (~3 queries) | 3.2s | **0.92s** | 3.5× |
+  | `/dashboard/summary` (21 queries) | 7.1s | **1.85s** | **3.8×** |
+
+  The predicted gain from the region move alone was "roughly 4×", and the dashboard came in at 3.8× — which is the strongest available confirmation that the original diagnosis (per-round-trip cost, not a slow container) was right rather than lucky. Note the improvement still *scales with query count*, exactly as the linear-scaling finding predicted: the no-DB endpoint gained least, the 21-query endpoint gained most.
+
+  **Cause 2 remains open and is now the dominant cost.** `/dashboard/summary` is still ~8× slower than `/health`, and 21 sequential round trips is a wasteful way to build one page at any latency. Deferred by decision 2026-07-29 — the app is fast enough to work with, and this is now an optimisation rather than a problem. Moving the Supabase project to Singapore too (it's still in Mumbai; Supabase can't relocate in place, so it needs a new project plus a data migration) would close most of the remaining gap without touching code.
 - **Every push to `develop` deploys straight to production with no gate.** Railway and Vercel both auto-deploy from that branch, and there is no CI, so the 109-test suite only runs when someone remembers to run it locally. Alembic migrations also apply themselves on API start — convenient, but it means a bad migration ships itself.
 
 - ~~**No `GEMINI_API_KEY` was configured**~~ — resolved: a real key was provided and added to `.env`, live end-to-end verified (see Change Log). `gemini-2.0-flash` returned `429 RESOURCE_EXHAUSTED` (`limit: 0` on this project's free tier for that specific model) — switched the default model to `gemini-2.5-flash`, which worked at the time. **Superseded 2026-07-25**: the default is now `gemini-flash-latest` (an alias Google repoints as models are retired), currently resolving to `gemini-3.6-flash`. Confirmed live that `gemini-2.5-flash` itself now returns `404 — "no longer available to new users"`, i.e. the pinned model this entry recommended has since been retired while the alias kept working straight through it. That's the deliberate reason for preferring the alias here: a pinned model dying silently is a worse failure mode for this app than an unannounced model upgrade, since nothing monitors it and the output is Pydantic-validated and only ever shown as an accept-or-ignore suggestion. **Minor open item** (originally attributed to `gemini-2.5-flash`, not re-checked against the current model): structured-JSON output occasionally corrupts an em-dash (`—`) inside a generated `title` into a stray `\", \"` sequence — reproduced directly against the raw API, so it's a model-side structured-decoding quirk for that specific character, not a bug in our JSON parsing (the JSON itself is valid; Pydantic validates it fine) and not something our code can reliably prevent. Doesn't crash anything — worst case is a slightly garbled suggested title, which is display-only until a user explicitly clicks Accept. Only seen so far in one PPTX test document; not seen in the real live demo document (a plain-text HR policy) or other test documents.
@@ -1017,13 +1028,20 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 
 **Authentication is done** — real passwords, invite-only accounts, password reset, transactional email, and admin user management (deactivate / reactivate / change role) are all live and verified in production.
 
-What's left:
+**Production latency is substantially better** — the Railway service was moved to Singapore on 2026-07-29, and the dashboard went from 7.1s to **1.85s** (3.8×). Full before/after table in §10.
 
-1. **Separate the local and production databases (new, and arguably now the highest priority).** One Supabase Postgres currently serves both, which on 2026-07-28 turned a routine local migration into a production outage — see the warning at the top of this document. It also means there is nowhere safe to try anything destructive. A second Supabase project for local work would make this class of incident impossible.
-2. **Fix production latency (see §10).** The deployed app is 4–15× slower than local, measured: `/health` 0.47s, one query 1.3s, the dashboard **7.1s**. Diagnosed, not guessed — latency scales linearly with query count, so it's per-round-trip cost, not a slow container. Two known contributors: the Railway region is far from the Supabase region, and `/dashboard/summary` issues 21 SQL statements.
-3. **A CI workflow.** Every push to `develop` deploys straight to production with no gate — the 178 tests only run if someone remembers to run them locally. Given item 1, a green-tests gate is the cheapest protection available right now.
-4. **Frontend tests** — still nothing at all. Verification today is `tsc` + `eslint` + a production build + driving the running app by hand. Also outstanding: the scripted demo walkthrough exercising each of the six pains from the original brief in order (§19.7).
-5. **Delete or ignore the `main` branch.** Vercel's production branch is now `develop`; `main` is ~16 commits behind and nothing depends on it.
+### Deferred by decision (2026-07-29)
+
+*Reviewed and consciously postponed — these are choices, not oversights. Recorded here so the reasoning survives and they don't get silently rediscovered as "bugs" later.*
+
+- **Separate the local and production databases.** The single highest-risk item on this list: one Supabase Postgres serves both, and on 2026-07-28 that turned a routine local migration into a production outage (see the warning at the top of this document). Deferred anyway — the workaround is a discipline rather than a code change (**merge and deploy before migrating locally**), and it has held since. Revisit before anyone else joins the project, or before any migration that drops or rewrites data, because the workaround depends entirely on one person remembering it.
+- **Collapse `/dashboard/summary`'s 21 SQL statements.** Now the dominant remaining latency cost, but the app is fast enough to use after the region move. This is an optimisation, not a problem. See §10 for the measured numbers.
+- **A CI workflow.** Pushes to `develop` still deploy straight to production with the 178 tests running only if someone remembers. Accepted for a single-developer project where the tests *are* being run; the cost/benefit changes the moment a second person can push.
+
+### Still genuinely open
+
+1. **Frontend tests** — still nothing at all. Verification today is `tsc` + `eslint` + a production build + driving the running app by hand. Also outstanding: the scripted demo walkthrough exercising each of the six pains from the original brief in order (§19.7).
+2. **Delete or ignore the `main` branch.** Vercel's production branch is now `develop`; `main` is ~16 commits behind and nothing depends on it.
 
 Ask before starting, per standing practice.
 
@@ -1052,6 +1070,11 @@ Ask before starting, per standing practice.
 ## 13. Change Log
 
 *(Reverse chronological. Never delete history — always append.)*
+
+### 2026-07-29
+
+- **Moved the Railway service to Singapore — production latency improved 2–3.8×, and the original diagnosis was confirmed rather than merely assumed.** Re-measured the same four endpoints (best of 3, discounting cold starts): `/health` 0.47s → **0.23s**, `/auth/users` 1.30s → **0.49s**, `/documents` 3.2s → **0.92s**, `/dashboard/summary` 7.1s → **1.85s**. The 2026-07-27 analysis predicted "roughly 4×" from the region change alone and the dashboard came in at 3.8×; the gain also still scales with query count, exactly as the linear-scaling finding said it would. Full table in §10.
+- **Reviewed the three open infrastructure items and deferred all three by explicit decision** — separating the local/production databases, collapsing `/dashboard/summary`'s 21 queries, and adding a CI gate. Recorded in §11 under a new "Deferred by decision" heading rather than left in a priority list, so the reasoning survives and they aren't silently rediscovered as bugs later. The database split keeps its full risk description in §10, including the note that its workaround is a discipline one person has to remember, not a guarantee.
 
 ### 2026-07-28
 
