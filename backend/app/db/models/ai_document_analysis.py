@@ -36,6 +36,14 @@ class AiDocumentAnalysis(Base):
     __tablename__ = "ai_document_analysis"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Nullable for now — see the Phase 2 migration
+    # (docs/MULTI-TENANT-ARCHITECTURE-REVIEW.md) for why NOT NULL isn't set
+    # until every write path supplies it. Defense-in-depth: the same
+    # "join through document_versions to reach the owning org" shape that
+    # let the pre-migration similarity search leak across tenants.
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
     document_version_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("document_versions.id", ondelete="CASCADE"),

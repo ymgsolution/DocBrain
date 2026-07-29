@@ -21,11 +21,12 @@ class UserAdminRepository:
     def __init__(self, db: Session) -> None:
         self.db = db
 
-    def get_by_id(self, user_id: uuid.UUID) -> User | None:
-        return self.db.get(User, user_id)
+    def get_by_id(self, user_id: uuid.UUID, organization_id: uuid.UUID) -> User | None:
+        stmt = select(User).where(User.id == user_id, User.organization_id == organization_id)
+        return self.db.scalar(stmt)
 
-    def _base_query(self, *, search: str | None, status: str) -> Select:
-        stmt = select(User)
+    def _base_query(self, *, organization_id: uuid.UUID, search: str | None, status: str) -> Select:
+        stmt = select(User).where(User.organization_id == organization_id)
 
         if status == "active":
             stmt = stmt.where(User.is_active.is_(True))
@@ -50,9 +51,9 @@ class UserAdminRepository:
         return stmt
 
     def search(
-        self, *, search: str | None, status: str, page: int, size: int
+        self, *, organization_id: uuid.UUID, search: str | None, status: str, page: int, size: int
     ) -> tuple[list[User], int]:
-        stmt = self._base_query(search=search, status=status)
+        stmt = self._base_query(organization_id=organization_id, search=search, status=status)
 
         count_stmt = select(func.count()).select_from(stmt.subquery())
         total = self.db.scalar(count_stmt) or 0
@@ -64,11 +65,17 @@ class UserAdminRepository:
         stmt = stmt.offset(page * size).limit(size)
         return list(self.db.scalars(stmt)), total
 
-    def count_active_admins(self, *, excluding: uuid.UUID | None = None) -> int:
-        """How many admins would still be able to administer. `excluding` asks
-        the question as it will be *after* the change under consideration."""
+    def count_active_admins(self, organization_id: uuid.UUID, *, excluding: uuid.UUID | None = None) -> int:
+        """How many admins would still be able to administer *this
+        organization*. `excluding` asks the question as it will be *after*
+        the change under consideration.
+
+        organization_id is required, not optional: without it, an org with
+        zero admins of its own could be created as long as some other org
+        still had active admins somewhere in the database — the lockout
+        guard would never trip for the org that actually needs it."""
         stmt = select(func.count()).select_from(User).where(
-            User.role == UserRole.ADMIN, User.is_active.is_(True)
+            User.role == UserRole.ADMIN, User.is_active.is_(True), User.organization_id == organization_id
         )
         if excluding is not None:
             stmt = stmt.where(User.id != excluding)

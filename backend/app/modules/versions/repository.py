@@ -30,10 +30,20 @@ class VersionRepository:
         )
         return self.db.scalar(stmt)
 
-    def get_document_for_update(self, document_id: uuid.UUID) -> Document | None:
+    def get_document_for_update(self, document_id: uuid.UUID, organization_id: uuid.UUID) -> Document | None:
         """Row-locked fetch — prevents two concurrent uploads against the same
-        document from allocating the same next version_number (§12.3, §14.1)."""
-        stmt = select(Document).where(Document.id == document_id).with_for_update()
+        document from allocating the same next version_number (§12.3, §14.1).
+
+        This is the entry point for upload_version/restore_version — unlike
+        list_versions/get_content, they never go through
+        DocumentService.get_detail first, so the organization_id filter has
+        to live here directly rather than being inherited from an
+        already-checked Document object."""
+        stmt = (
+            select(Document)
+            .where(Document.id == document_id, Document.organization_id == organization_id)
+            .with_for_update()
+        )
         return self.db.scalar(stmt)
 
     def next_version_number(self, document_id: uuid.UUID) -> int:

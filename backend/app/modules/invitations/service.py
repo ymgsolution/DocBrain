@@ -48,16 +48,19 @@ class InvitationService:
             token_hash=hash_token(token),
             email=normalised,
             role=role,
+            # The invitee joins the inviting admin's own organization — the
+            # only organization an admin has authority to grant access to.
+            organization_id=invited_by.organization_id,
             expires_at=datetime.now(timezone.utc) + timedelta(days=expires_in_days),
             invited_by=invited_by.id,
         )
         return self.repository.add(invitation), token
 
-    def list_all(self) -> list[Invitation]:
-        return self.repository.list_all()
+    def list_all(self, organization_id: uuid.UUID) -> list[Invitation]:
+        return self.repository.list_all(organization_id)
 
-    def revoke(self, invitation_id: uuid.UUID) -> Invitation:
-        invitation = self.repository.get_by_id(invitation_id)
+    def revoke(self, invitation_id: uuid.UUID, organization_id: uuid.UUID) -> Invitation:
+        invitation = self.repository.get_by_id(invitation_id, organization_id)
         if invitation is None:
             raise NotFoundError("That invitation doesn't exist.")
         if invitation.accepted_at is not None:
@@ -98,6 +101,7 @@ class InvitationService:
             email=invitation.email,
             display_name=display_name.strip(),
             role=invitation.role,
+            organization_id=invitation.organization_id,
             is_active=True,
             password_hash=hash_password(password),
         )

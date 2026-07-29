@@ -32,7 +32,13 @@ def list_pending_reviews(
     service: ReviewsService = Depends(get_reviews_service),
     current_user: User = Depends(require_role(UserRole.REVIEWER, UserRole.ADMIN)),
 ) -> PagedPendingReviews:
-    items, total = service.list_pending(category_id=category_id, owner_id=owner_id, page=page, size=size)
+    items, total = service.list_pending(
+        organization_id=current_user.organization_id,
+        category_id=category_id,
+        owner_id=owner_id,
+        page=page,
+        size=size,
+    )
     today = datetime.now(timezone.utc).date()
 
     out_items = []

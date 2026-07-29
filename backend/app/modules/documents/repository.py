@@ -30,28 +30,42 @@ class DocumentRepository:
             selectinload(Document.current_version).selectinload(DocumentVersion.analysis),
         )
 
-    def get_active_by_id(self, document_id: uuid.UUID) -> Document | None:
-        stmt = self._detail_query().where(Document.id == document_id, Document.status == DocumentStatus.ACTIVE)
+    def get_active_by_id(self, document_id: uuid.UUID, organization_id: uuid.UUID) -> Document | None:
+        stmt = self._detail_query().where(
+            Document.id == document_id,
+            Document.status == DocumentStatus.ACTIVE,
+            Document.organization_id == organization_id,
+        )
         return self.db.scalar(stmt)
 
-    def get_any_by_id(self, document_id: uuid.UUID) -> Document | None:
-        stmt = self._detail_query().where(Document.id == document_id)
+    def get_any_by_id(self, document_id: uuid.UUID, organization_id: uuid.UUID) -> Document | None:
+        stmt = self._detail_query().where(
+            Document.id == document_id, Document.organization_id == organization_id
+        )
         return self.db.scalar(stmt)
 
-    def list_by_ids(self, document_ids: list[uuid.UUID]) -> list[Document]:
+    def list_by_ids(self, document_ids: list[uuid.UUID], organization_id: uuid.UUID) -> list[Document]:
         """Similar Document Detection track — hydrates the Document rows a
         SimilarityService query already ranked by id, with the same
         eager-loading (_base_query) a listing endpoint gets. Order is not
         guaranteed to match document_ids; callers that need ranked order
-        (e.g. by similarity score) re-sort using the input list themselves."""
+        (e.g. by similarity score) re-sort using the input list themselves.
+
+        organization_id is required here too, not just trusted from the
+        caller's already-scoped query that produced document_ids — a second
+        independent check on the actual rows returned, cheap insurance
+        against a future caller passing in an unscoped id list."""
         if not document_ids:
             return []
-        stmt = self._base_query().where(Document.id.in_(document_ids))
+        stmt = self._base_query().where(
+            Document.id.in_(document_ids), Document.organization_id == organization_id
+        )
         return list(self.db.scalars(stmt))
 
     def list_documents(
         self,
         *,
+        organization_id: uuid.UUID,
         q: str | None,
         category_id: uuid.UUID | None,
         tag_ids: list[uuid.UUID] | None,
@@ -62,7 +76,7 @@ class DocumentRepository:
         page: int,
         size: int,
     ) -> tuple[list[Document], int]:
-        stmt = self._base_query().where(Document.status == status)
+        stmt = self._base_query().where(Document.status == status, Document.organization_id == organization_id)
 
         if q:
             tsquery = func.plainto_tsquery("english", q)
@@ -119,21 +133,25 @@ class DocumentRepository:
     def clear_tags(self, document_id: uuid.UUID) -> None:
         self.db.query(DocumentTag).filter(DocumentTag.document_id == document_id).delete()
 
-    def get_or_create_tags(self, names: list[str]) -> list[Tag]:
+    def get_or_create_tags(self, names: list[str], organization_id: uuid.UUID) -> list[Tag]:
         tags = []
         for raw_name in names:
             normalized = raw_name.strip().lower()
             if not normalized:
                 continue
-            tag = self.db.scalar(select(Tag).where(Tag.normalized_name == normalized))
+            tag = self.db.scalar(
+                select(Tag).where(Tag.normalized_name == normalized, Tag.organization_id == organization_id)
+            )
             if tag is None:
-                tag = Tag(name=raw_name.strip(), normalized_name=normalized)
+                tag = Tag(name=raw_name.strip(), normalized_name=normalized, organization_id=organization_id)
                 self.db.add(tag)
                 self.db.flush()
             tags.append(tag)
         return tags
 
-    def list_trash(self, *, owner_id: uuid.UUID | None, page: int, size: int) -> tuple[list[Document], int]:
+    def list_trash(
+        self, *, organization_id: uuid.UUID, owner_id: uuid.UUID | None, page: int, size: int
+    ) -> tuple[list[Document], int]:
         stmt = (
             select(Document)
             .options(
@@ -141,7 +159,7 @@ class DocumentRepository:
                 selectinload(Document.owner),
                 selectinload(Document.deleted_by_user),
             )
-            .where(Document.status == DocumentStatus.DELETED)
+            .where(Document.status == DocumentStatus.DELETED, Document.organization_id == organization_id)
             .order_by(Document.deleted_at.desc())
         )
         if owner_id:
@@ -156,8 +174,9 @@ class DocumentRepository:
         items = list(self.db.scalars(stmt))
         return items, total
 
-    def get_category(self, category_id: uuid.UUID) -> Category | None:
-        return self.db.get(Category, category_id)
+    def get_category(self, category_id: uuid.UUID, organization_id: uuid.UUID) -> Category | None:
+        stmt = select(Category).where(Category.id == category_id, Category.organization_id == organization_id)
+        return self.db.scalar(stmt)
 
     def list_version_storage_paths(self, document_id: uuid.UUID) -> list[tuple[str, str]]:
         stmt = select(DocumentVersion.storage_path, DocumentVersion.storage_provider).where(

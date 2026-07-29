@@ -30,6 +30,7 @@ from app.core.config import get_settings
 from app.db.models import Category, User
 from app.core.passwords import hash_password
 from app.db.models.enums import UserRole
+from app.db.models.organization import DEFAULT_ORGANIZATION_ID
 from app.main import app
 from app.modules.documents.repository import DocumentRepository
 from app.modules.documents.router import get_document_service
@@ -138,12 +139,13 @@ def make_user(db_session: Session):
     fixture so a test needing a *second* employee (permission checks) can
     ask for one without a near-duplicate fixture per role."""
 
-    def _make(role: UserRole) -> User:
+    def _make(role: UserRole, *, organization_id: uuid.UUID = DEFAULT_ORGANIZATION_ID) -> User:
         suffix = uuid.uuid4().hex[:8]
         user = User(
             email=f"{role.value.lower()}-{suffix}@test.docbrain",
             display_name=f"Test {role.value.title()} {suffix}",
             role=role,
+            organization_id=organization_id,
             is_active=True,
             password_hash=hash_password(TEST_PASSWORD),
         )
@@ -184,7 +186,11 @@ def today() -> date:
 @pytest.fixture
 def category(db_session: Session) -> Category:
     suffix = uuid.uuid4().hex[:8]
-    row = Category(name=f"Test Category {suffix}", slug=f"test-category-{suffix}")
+    row = Category(
+        name=f"Test Category {suffix}",
+        slug=f"test-category-{suffix}",
+        organization_id=DEFAULT_ORGANIZATION_ID,
+    )
     db_session.add(row)
     db_session.flush()
     return row

@@ -47,6 +47,7 @@ def list_documents(
     current_user: User = Depends(get_current_user),
 ) -> PagedDocuments:
     items, total = service.list_documents(
+        organization_id=current_user.organization_id,
         q=q,
         category_id=category_id,
         tag_ids=tag_id,
@@ -119,7 +120,7 @@ def get_document(
     service: DocumentService = Depends(get_document_service),
     current_user: User = Depends(get_current_user),
 ) -> DocumentDetail:
-    document = service.get_detail(document_id)
+    document = service.get_detail(document_id, current_user.organization_id)
     service.touch_last_accessed(document)
     return to_document_detail(document)
 
@@ -132,8 +133,11 @@ def get_similar_documents(
     similarity: SimilarityService = Depends(get_similarity_service),
     current_user: User = Depends(get_current_user),
 ) -> list[SimilarDocument]:
-    service.get_detail(document_id)  # 404s via NotFoundError if missing/inactive, same as GET /documents/{id}
-    results = similarity.find_similar_documents(document_id, limit=limit)
+    # 404s via NotFoundError if missing/inactive/another org's, same as GET /documents/{id}
+    service.get_detail(document_id, current_user.organization_id)
+    results = similarity.find_similar_documents(
+        document_id, organization_id=current_user.organization_id, limit=limit
+    )
     return [to_similar_document(document, score) for document, score in results]
 
 
@@ -144,7 +148,7 @@ def review_ai_suggestion(
     analysis_repo: AiDocumentAnalysisRepository = Depends(get_analysis_repository),
     current_user: User = Depends(get_current_user),
 ) -> DocumentDetail:
-    document = service.get_detail(document_id)
+    document = service.get_detail(document_id, current_user.organization_id)
     if document.current_version is not None:
         analysis_repo.mark_reviewed(document.current_version.id, accepted_by=current_user.id)
     return to_document_detail(document)

@@ -65,7 +65,19 @@ class TextExtractionService:
         # side by side, independently of each other — neither depends on the
         # other's outcome or completion order (Similar Document Detection track).
         if result.char_count > 0:
-            db.add(AiJob(job_type=AiJobType.GENERATE_METADATA, document_version_id=version.id))
-            db.add(AiJob(job_type=AiJobType.GENERATE_EMBEDDING, document_version_id=version.id))
+            db.add(
+                AiJob(
+                    job_type=AiJobType.GENERATE_METADATA,
+                    document_version_id=version.id,
+                    organization_id=version.organization_id,
+                )
+            )
+            db.add(
+                AiJob(
+                    job_type=AiJobType.GENERATE_EMBEDDING,
+                    document_version_id=version.id,
+                    organization_id=version.organization_id,
+                )
+            )
 
         db.commit()

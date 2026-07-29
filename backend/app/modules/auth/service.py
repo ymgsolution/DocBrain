@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime
 
 from app.core.exceptions import UnauthorizedError
@@ -16,8 +17,8 @@ class AuthService:
     def __init__(self, repository: AuthRepository) -> None:
         self.repository = repository
 
-    def list_personas(self) -> list[User]:
-        return self.repository.list_active_users()
+    def list_personas(self, organization_id: uuid.UUID) -> list[User]:
+        return self.repository.list_active_users(organization_id)
 
     def login(self, email: str, password: str) -> tuple[str, datetime, User]:
         """One error message for every failure — unknown email, wrong

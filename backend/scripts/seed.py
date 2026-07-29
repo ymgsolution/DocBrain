@@ -23,6 +23,7 @@ from app.db.models import (
     UserPreference,
 )
 from app.db.models.enums import ActivityEventType, DocumentStatus, ThemePreference, UserRole
+from app.db.models.organization import DEFAULT_ORGANIZATION_ID
 from app.db.session import engine
 
 random.seed(42)
@@ -106,7 +107,10 @@ def truncate_all(session: Session) -> None:
 
 
 def seed_users(session: Session) -> list[User]:
-    users = [User(email=email, display_name=name, role=role) for email, name, role in USERS]
+    users = [
+        User(email=email, display_name=name, role=role, organization_id=DEFAULT_ORGANIZATION_ID)
+        for email, name, role in USERS
+    ]
     session.add_all(users)
     session.flush()
     for i, user in enumerate(users):
@@ -122,7 +126,13 @@ def seed_users(session: Session) -> list[User]:
 
 def seed_categories(session: Session) -> list[Category]:
     categories = [
-        Category(name=name, slug=slugify(name), description=desc, default_review_period_days=period)
+        Category(
+            name=name,
+            slug=slugify(name),
+            description=desc,
+            default_review_period_days=period,
+            organization_id=DEFAULT_ORGANIZATION_ID,
+        )
         for name, desc, period in CATEGORIES
     ]
     session.add_all(categories)
@@ -131,7 +141,9 @@ def seed_categories(session: Session) -> list[Category]:
 
 
 def seed_tags(session: Session) -> list[Tag]:
-    tags = [Tag(name=name, normalized_name=name.lower()) for name in TAGS]
+    tags = [
+        Tag(name=name, normalized_name=name.lower(), organization_id=DEFAULT_ORGANIZATION_ID) for name in TAGS
+    ]
     session.add_all(tags)
     session.flush()
     return tags
@@ -179,6 +191,7 @@ def seed_documents(
             description=f"{title} — maintained by {owner.display_name}.",
             category_id=category.id,
             owner_id=owner.id,
+            organization_id=DEFAULT_ORGANIZATION_ID,
             status=DocumentStatus.ACTIVE,
             review_due_date=pick_review_due_date(review_buckets[i]),
             created_at=created_at,
@@ -197,6 +210,7 @@ def seed_documents(
             session.add(
                 ActivityEvent(
                     document_id=doc.id,
+                    organization_id=DEFAULT_ORGANIZATION_ID,
                     actor_id=reviewer.id,
                     event_type=ActivityEventType.REVIEWED,
                     summary=f"{reviewer.display_name} marked “{title}” as reviewed",
@@ -217,6 +231,7 @@ def seed_documents(
             uploader = owner if v == 1 else random.choice(employees)
             version = DocumentVersion(
                 document_id=doc.id,
+                organization_id=DEFAULT_ORGANIZATION_ID,
                 version_number=v,
                 storage_path=f"uploads/documents/{doc.id}/v{v}__{slugify(filename)}",
                 original_filename=filename,
@@ -237,6 +252,7 @@ def seed_documents(
             session.add(
                 ActivityEvent(
                     document_id=doc.id,
+                    organization_id=DEFAULT_ORGANIZATION_ID,
                     actor_id=uploader.id,
                     event_type=ActivityEventType.CREATED if v == 1 else ActivityEventType.VERSION_UPLOADED,
                     summary=(

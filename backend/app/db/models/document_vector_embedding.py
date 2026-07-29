@@ -33,6 +33,15 @@ class DocumentVectorEmbedding(Base):
     __tablename__ = "document_vector_embeddings"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Mandatory, not just defense-in-depth: this is the column the
+    # similarity search filters on directly, rather than relying on the
+    # document_versions -> documents join chain — that join chain is exactly
+    # how the pre-migration version of this query had no tenant isolation at
+    # all (docs/MULTI-TENANT-ARCHITECTURE-REVIEW.md, Part 7). Nullable only
+    # because NOT NULL waits for every write path to supply it (Phase 2).
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
     document_version_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("document_versions.id", ondelete="CASCADE"),

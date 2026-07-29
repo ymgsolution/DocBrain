@@ -27,7 +27,12 @@ class DocumentVectorEmbeddingRepository:
         return row
 
     def find_similar(
-        self, *, query_vector: list[float], exclude_document_id: uuid.UUID, limit: int
+        self,
+        *,
+        query_vector: list[float],
+        exclude_document_id: uuid.UUID,
+        organization_id: uuid.UUID,
+        limit: int,
     ) -> list[tuple[uuid.UUID, float]]:
         """Returns (document_id, cosine_similarity) pairs, most similar
         first, over every ACTIVE document's current-version SUCCEEDED
@@ -41,6 +46,18 @@ class DocumentVectorEmbeddingRepository:
         only), so that filtering belongs in this one shared query rather
         than being re-implemented by every caller.
 
+        organization_id is filtered on Document.organization_id, not
+        DocumentVectorEmbedding.organization_id, deliberately: the join to
+        Document is already required for the status/current-version checks
+        above, and filtering the same row this query is already touching
+        means there is no separate assumption to keep in sync if the two
+        ever disagreed. This is the query that had no tenant isolation at
+        all before this migration — see
+        docs/MULTI-TENANT-ARCHITECTURE-REVIEW.md, Part 7. Without this
+        predicate, a pgvector nearest-neighbor search has no reason to
+        respect organization boundaries; it will happily rank another
+        org's documents as "similar".
+
         Returns bare document_ids, not hydrated Document rows — this
         repository doesn't own how a Document should be eager-loaded for a
         response; SimilarityService hydrates via DocumentRepository."""
@@ -53,6 +70,7 @@ class DocumentVectorEmbeddingRepository:
                 DocumentVectorEmbedding.status == AiAnalysisStatus.SUCCEEDED,
                 Document.status == DocumentStatus.ACTIVE,
                 Document.id != exclude_document_id,
+                Document.organization_id == organization_id,
             )
             .order_by(distance)
             .limit(limit)

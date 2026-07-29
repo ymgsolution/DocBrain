@@ -44,7 +44,7 @@ def list_users(
     colleagues seeing each other is normal for a shared workspace; strangers
     harvesting the staff list is not.
     """
-    return service.list_personas()
+    return service.list_personas(current_user.organization_id)
 
 
 @router.post("/login", response_model=TokenResponse)

@@ -54,7 +54,7 @@ def list_versions(
     document_service: DocumentService = Depends(get_document_service),
     current_user: User = Depends(get_current_user),
 ) -> list[VersionDetail]:
-    document = document_service.get_detail(document_id)
+    document = document_service.get_detail(document_id, current_user.organization_id)
     versions = version_service.list_versions(document)
     return [to_version_detail(v, document.current_version_id) for v in versions]
 
@@ -82,7 +82,7 @@ def download_version(
     document_service: DocumentService = Depends(get_document_service),
     current_user: User = Depends(get_current_user),
 ) -> StreamingResponse:
-    document = document_service.get_detail(document_id)
+    document = document_service.get_detail(document_id, current_user.organization_id)
     version, stream = version_service.get_content(document, version_number)
     disp = _resolve_disposition(disposition, version.mime_type)
     headers = {
