@@ -17,11 +17,11 @@ class DocumentVectorEmbeddingRepository:
         )
         return self.db.scalar(stmt)
 
-    def get_or_create(self, document_version_id: uuid.UUID) -> DocumentVectorEmbedding:
+    def get_or_create(self, document_version_id: uuid.UUID, organization_id: uuid.UUID) -> DocumentVectorEmbedding:
         existing = self.get_by_version_id(document_version_id)
         if existing is not None:
             return existing
-        row = DocumentVectorEmbedding(document_version_id=document_version_id)
+        row = DocumentVectorEmbedding(document_version_id=document_version_id, organization_id=organization_id)
         self.db.add(row)
         self.db.flush()
         return row
