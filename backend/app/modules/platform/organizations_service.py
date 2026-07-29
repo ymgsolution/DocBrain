@@ -14,7 +14,21 @@ from app.utils.slugify import slugify
 # A generic starter set, not a copy of any specific org's taxonomy — that
 # org's own admin can rename, delete, or add to these immediately, exactly
 # as freely as Accenture's admin manages its 13 categories today.
-DEFAULT_CATEGORY_NAMES = ["General", "Finance", "HR", "Legal", "Operations"]
+#
+# Each one also gets a default_review_period_days, mirroring the mix already
+# used by the pre-existing seed categories (scripts/seed.py's CATEGORIES).
+# Without it, ReviewsService.mark_reviewed has no period to compute a new
+# review_due_date from and intentionally leaves the due date untouched (see
+# its docstring) — correct behavior for a category that genuinely has no
+# configured cadence, but not what a *default* starter category should do,
+# since it silently made "mark as reviewed" look like it did nothing.
+DEFAULT_CATEGORIES = [
+    ("General", 180),
+    ("Finance", 90),
+    ("HR", 365),
+    ("Legal", 365),
+    ("Operations", 180),
+]
 
 
 class OrganizationsService:
@@ -43,9 +57,14 @@ class OrganizationsService:
         # first row for this one — no collision to check for, unlike
         # TaxonomyService._unique_slug which handles a caller picking a name
         # that already exists in an established org's taxonomy.
-        for category_name in DEFAULT_CATEGORY_NAMES:
+        for category_name, period_days in DEFAULT_CATEGORIES:
             self.repository.db.add(
-                Category(organization_id=organization.id, name=category_name, slug=slugify(category_name))
+                Category(
+                    organization_id=organization.id,
+                    name=category_name,
+                    slug=slugify(category_name),
+                    default_review_period_days=period_days,
+                )
             )
 
         self.repository.db.commit()

@@ -14,6 +14,7 @@ test rather than just unit-testing the pieces separately.
 
 import io
 import uuid
+from datetime import date, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -240,6 +241,55 @@ def test_new_organization_starts_with_default_categories_only_visible_to_it(
     accenture_categories = client.get("/api/v1/categories", headers=auth(employee))
     accenture_category_ids = {c["id"] for c in accenture_categories.json()}
     assert new_org_category_ids.isdisjoint(accenture_category_ids)
+
+
+def test_default_categories_have_a_review_period_so_marking_reviewed_advances_the_due_date(
+    client: TestClient, platform_admin: PlatformAdmin
+) -> None:
+    """Regression test for the reported bug: reviewing a document under a
+    new organization's default category must genuinely move its due date
+    forward, not just record last_reviewed_at while silently leaving the
+    stale due date in place (which still reads as "Due Soon"/"Overdue" and
+    makes a successful review look like it did nothing)."""
+    headers = _platform_auth(client, platform_admin)
+    create_org = client.post(ORGANIZATIONS, headers=headers, json={"name": f"Org {uuid.uuid4().hex[:8]}"})
+    org_id = create_org.json()["id"]
+
+    create_admin = client.post(
+        f"{ORGANIZATIONS}/{org_id}/admins",
+        headers=headers,
+        json={
+            "email": f"admin-{uuid.uuid4().hex[:8]}@test.docbrain",
+            "displayName": "New Org Admin",
+            "password": "SomePassword123",
+        },
+    )
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"email": create_admin.json()["email"], "password": "SomePassword123"},
+    )
+    new_org_headers = {"Authorization": f"Bearer {login.json()['token']}"}
+
+    categories = client.get("/api/v1/categories", headers=new_org_headers).json()
+    general = next(c for c in categories if c["name"] == "General")
+    assert general["defaultReviewPeriodDays"] == 180
+
+    due_soon_date = (date.today() + timedelta(days=10)).isoformat()
+    upload = client.post(
+        "/api/v1/documents",
+        headers=new_org_headers,
+        data={"title": "Policy Doc", "categoryId": general["id"], "tags": "", "reviewDueDate": due_soon_date},
+        files={"file": ("notes.txt", io.BytesIO(b"contents"), "text/plain")},
+    )
+    assert upload.status_code == 201, upload.text
+    document_id = upload.json()["id"]
+    assert upload.json()["reviewDueDate"] == due_soon_date
+
+    reviewed = client.post(f"/api/v1/documents/{document_id}/reviews", headers=new_org_headers, json={})
+    assert reviewed.status_code == 200, reviewed.text
+    new_due_date = reviewed.json()["reviewDueDate"]
+    assert new_due_date != due_soon_date, "review_due_date must advance, not stay on the pre-review date"
+    assert new_due_date == (date.today() + timedelta(days=180)).isoformat()
 
 
 def test_cannot_create_second_first_admin_with_duplicate_email(
