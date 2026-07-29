@@ -28,14 +28,12 @@ class ShareLink(Base):
     __tablename__ = "share_links"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    # Nullable for now — see the Phase 2 migration
-    # (docs/MULTI-TENANT-ARCHITECTURE-REVIEW.md) for why NOT NULL isn't set
-    # until every write path supplies it. Only the owner-facing
-    # create/list/revoke routes ever filter on this — the public token
-    # redemption path needs no org check, the token itself is the
-    # authorization.
-    organization_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=True, index=True
+    # NOT NULL as of the Phase 4 migration (8ebd25762f70). Only the
+    # owner-facing create/list/revoke routes ever filter on this — the public
+    # token redemption path needs no org check, the token itself is the
+    # authorization (docs/MULTI-TENANT-ARCHITECTURE-REVIEW.md).
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True
     )
 
     # SHA-256 of the token that was handed to the user, never the token

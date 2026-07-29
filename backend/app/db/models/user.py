@@ -18,12 +18,13 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    # Nullable for now, matching the DB column added in the Phase 2 migration
-    # (docs/MULTI-TENANT-ARCHITECTURE-REVIEW.md) — every existing row is
-    # already backfilled, but NOT NULL is only added once every write path
-    # (invitation accept, seed scripts) reliably supplies it (Phase 4).
-    organization_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=True, index=True
+    # NOT NULL as of the Phase 4 migration (8ebd25762f70) — every write path
+    # (invitation accept, platform-admin org creation, seed scripts) supplies
+    # it. Platform admins live in their own table with no organization at all,
+    # which is exactly why that concept was kept off this model
+    # (docs/MULTI-TENANT-ARCHITECTURE-REVIEW.md).
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     display_name: Mapped[str] = mapped_column(String, nullable=False)
@@ -49,7 +50,7 @@ class User(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
-    organization: Mapped["Organization | None"] = relationship(foreign_keys=[organization_id], lazy="joined")
+    organization: Mapped["Organization"] = relationship(foreign_keys=[organization_id], lazy="joined")
     preferences: Mapped["UserPreference | None"] = relationship(back_populates="user", uselist=False)
     # Self-referential, so remote_side/foreign_keys have to be spelled out —
     # without them SQLAlchemy can't tell which end of a users->users FK this

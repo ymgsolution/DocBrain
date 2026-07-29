@@ -23,15 +23,13 @@ class AiJob(Base):
     __tablename__ = "ai_jobs"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    # Nullable for now — see the Phase 2 migration
-    # (docs/MULTI-TENANT-ARCHITECTURE-REVIEW.md) for why NOT NULL isn't set
-    # until every write path supplies it. Not needed for the worker's claim
-    # query to stay correct (a job always resolves to exactly one document,
-    # hence one org) — carried mainly for future per-org fairness/throttling
-    # and as defense-in-depth, same reasoning as the AI analysis/embedding
-    # tables.
-    organization_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=True, index=True
+    # NOT NULL as of the Phase 4 migration (8ebd25762f70). Not needed for the
+    # worker's claim query to stay correct (a job always resolves to exactly
+    # one document, hence one org) — carried mainly for future per-org
+    # fairness/throttling and as defense-in-depth, same reasoning as the AI
+    # analysis/embedding tables.
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     job_type: Mapped[AiJobType] = mapped_column(
         Enum(AiJobType, name="ai_job_type", values_callable=lambda e: [m.value for m in e]),
