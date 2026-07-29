@@ -18,6 +18,11 @@ class ActivityEvent(Base):
     __tablename__ = "activity_events"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # NOT NULL as of the Phase 4 migration (8ebd25762f70) — every write path
+    # supplies it (docs/MULTI-TENANT-ARCHITECTURE-REVIEW.md).
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
     document_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=True
     )

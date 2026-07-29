@@ -26,6 +26,12 @@ class Invitation(Base):
     __tablename__ = "invitations"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Who the invitee is joining — the inviting admin's own organization.
+    # NOT NULL as of the Phase 4 migration (8ebd25762f70) — every write path
+    # supplies it (docs/MULTI-TENANT-ARCHITECTURE-REVIEW.md).
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
 
     # SHA-256 of the token in the invite URL, never the token itself — a
     # leaked backup shouldn't hand someone an account.

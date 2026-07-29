@@ -17,11 +17,19 @@ class InvitationRepository:
         self.db.refresh(invitation)
         return invitation
 
-    def list_all(self) -> list[Invitation]:
-        return list(self.db.scalars(select(Invitation).order_by(Invitation.created_at.desc())))
+    def list_all(self, organization_id: uuid.UUID) -> list[Invitation]:
+        stmt = (
+            select(Invitation)
+            .where(Invitation.organization_id == organization_id)
+            .order_by(Invitation.created_at.desc())
+        )
+        return list(self.db.scalars(stmt))
 
-    def get_by_id(self, invitation_id: uuid.UUID) -> Invitation | None:
-        return self.db.get(Invitation, invitation_id)
+    def get_by_id(self, invitation_id: uuid.UUID, organization_id: uuid.UUID) -> Invitation | None:
+        stmt = select(Invitation).where(
+            Invitation.id == invitation_id, Invitation.organization_id == organization_id
+        )
+        return self.db.scalar(stmt)
 
     def get_pending_by_email(self, email: str) -> Invitation | None:
         """An outstanding invite for this address, if one exists — used to

@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -33,6 +33,15 @@ class DocumentVectorEmbedding(Base):
     __tablename__ = "document_vector_embeddings"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Mandatory, not just defense-in-depth: this is the column the
+    # similarity search filters on directly, rather than relying on the
+    # document_versions -> documents join chain — that join chain is exactly
+    # how the pre-migration version of this query had no tenant isolation at
+    # all (docs/MULTI-TENANT-ARCHITECTURE-REVIEW.md, Part 7). NOT NULL as of
+    # the Phase 4 migration (8ebd25762f70).
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
     document_version_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("document_versions.id", ondelete="CASCADE"),
@@ -64,3 +73,17 @@ class DocumentVectorEmbedding(Base):
     )
 
     document_version: Mapped["DocumentVersion"] = relationship(back_populates="embedding")
+
+    # The HNSW index that makes similarity search an approximate-nearest-
+    # neighbour lookup instead of a sequential scan over every embedding.
+    # Created with raw op.execute() in the migration (pgvector index types
+    # aren't expressible via index=True); declared here so `alembic revision
+    # --autogenerate` doesn't read it as "removed" and drop it.
+    __table_args__ = (
+        Index(
+            "ix_document_vector_embeddings_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )

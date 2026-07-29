@@ -15,7 +15,12 @@ class _EmbeddingLookup(Protocol):
     def get_by_version_id(self, document_version_id: uuid.UUID) -> DocumentVectorEmbedding | None: ...
 
     def find_similar(
-        self, *, query_vector: list[float], exclude_document_id: uuid.UUID, limit: int
+        self,
+        *,
+        query_vector: list[float],
+        exclude_document_id: uuid.UUID,
+        organization_id: uuid.UUID,
+        limit: int,
     ) -> list[tuple[uuid.UUID, float]]: ...
 
 
@@ -23,9 +28,9 @@ class _DocumentLookup(Protocol):
     """The slice of DocumentRepository this service actually calls — same
     Protocol-over-concrete-class reasoning as _EmbeddingLookup above."""
 
-    def get_active_by_id(self, document_id: uuid.UUID) -> Document | None: ...
+    def get_active_by_id(self, document_id: uuid.UUID, organization_id: uuid.UUID) -> Document | None: ...
 
-    def list_by_ids(self, document_ids: list[uuid.UUID]) -> list[Document]: ...
+    def list_by_ids(self, document_ids: list[uuid.UUID], organization_id: uuid.UUID) -> list[Document]: ...
 
 
 class SimilarityService:
@@ -45,9 +50,14 @@ class SimilarityService:
         self.documents = documents
 
     def find_similar_documents(
-        self, document_id: uuid.UUID, *, limit: int = 5, min_similarity: float | None = None
+        self,
+        document_id: uuid.UUID,
+        *,
+        organization_id: uuid.UUID,
+        limit: int = 5,
+        min_similarity: float | None = None,
     ) -> list[tuple[Document, float]]:
-        document = self.documents.get_active_by_id(document_id)
+        document = self.documents.get_active_by_id(document_id, organization_id)
         if document is None or document.current_version is None:
             return []
 
@@ -65,7 +75,10 @@ class SimilarityService:
         threshold = min_similarity if min_similarity is not None else get_settings().similarity_min_score
 
         ranked = self.embeddings.find_similar(
-            query_vector=embedding_row.embedding, exclude_document_id=document.id, limit=limit
+            query_vector=embedding_row.embedding,
+            exclude_document_id=document.id,
+            organization_id=organization_id,
+            limit=limit,
         )
         # A "top N by rank" match is meaningless if none of them are actually
         # close — e.g. two documents that only share generic boilerplate.
@@ -76,7 +89,10 @@ class SimilarityService:
             return []
 
         scores_by_id = dict(ranked)
-        hydrated_by_id = {doc.id: doc for doc in self.documents.list_by_ids([doc_id for doc_id, _ in ranked])}
+        hydrated_by_id = {
+            doc.id: doc
+            for doc in self.documents.list_by_ids([doc_id for doc_id, _ in ranked], organization_id)
+        }
 
         # Re-sort by the original ranked order — list_by_ids doesn't
         # guarantee it, and a document could in principle vanish between the

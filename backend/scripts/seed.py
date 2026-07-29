@@ -1,7 +1,10 @@
 """Seed the DocBrain database with a realistic, browsable demo corpus.
 
-Idempotent: truncates all app tables before reseeding, so it's safe to
-re-run against the same (dev/demo) database as often as needed.
+Idempotent *and tenant-scoped*: deletes and reseeds only the demo
+organization (DEFAULT_ORGANIZATION_ID), so it's safe to re-run against a
+database that also holds real organizations. Any other organization's rows
+are left alone, and a tripwire around the reset rolls the whole run back if
+that ever stops being true.
 
 Usage: uv run python scripts/seed.py
 """
@@ -23,6 +26,7 @@ from app.db.models import (
     UserPreference,
 )
 from app.db.models.enums import ActivityEventType, DocumentStatus, ThemePreference, UserRole
+from app.db.models.organization import DEFAULT_ORGANIZATION_ID
 from app.db.session import engine
 
 random.seed(42)
@@ -96,17 +100,69 @@ def fake_checksum(seed: str) -> str:
     return hashlib.sha256(seed.encode()).hexdigest()
 
 
-def truncate_all(session: Session) -> None:
-    session.execute(
-        text(
-            "TRUNCATE TABLE activity_events, document_tags, document_versions, "
-            "documents, user_preferences, tags, categories, users RESTART IDENTITY CASCADE"
+# Children first. The ON DELETE CASCADEs hanging off documents and
+# document_versions do most of the work (versions, document_tags,
+# activity_events, share_links, ai_jobs, ai_document_analysis,
+# document_vector_embeddings, document_extracted_text); the rest of this list
+# clears rows that hang off the organization directly rather than off a
+# document, and users last because documents/versions/activity reference it
+# with ON DELETE RESTRICT.
+_RESET_ORDER = (
+    "documents",
+    "activity_events",
+    "share_links",
+    "invitations",
+    "ai_jobs",
+    "ai_document_analysis",
+    "document_vector_embeddings",
+    "document_versions",
+    "tags",
+    "categories",
+    "users",  # cascades user_preferences and password_reset_tokens
+)
+
+
+def reset_default_organization(session: Session) -> None:
+    """Delete every row belonging to the demo organization — and nothing else.
+
+    This replaces a global `TRUNCATE ... CASCADE`, which emptied these tables
+    for *every* organization and then reseeded only this one. Any other
+    organization was left as a shell with no categories and no users: upload
+    blocked, nobody able to log in — the exact "new organization can't do
+    anything" bug this project has already fixed once. Since local and
+    production share one database, re-running the old version against a
+    multi-organization database was a live data-loss bug, not a theoretical
+    one.
+    """
+    for table in _RESET_ORDER:
+        session.execute(
+            text(f"DELETE FROM {table} WHERE organization_id = :org_id"),
+            {"org_id": DEFAULT_ORGANIZATION_ID},
         )
-    )
+
+
+def snapshot_other_organizations(session: Session) -> dict[str, int]:
+    """Row counts per organization, excluding the demo one — the tripwire that
+    proves the reset above stayed inside its own tenant."""
+    rows = session.execute(
+        text(
+            "SELECT o.name, "
+            "  (SELECT count(*) FROM users u WHERE u.organization_id = o.id) "
+            "+ (SELECT count(*) FROM categories c WHERE c.organization_id = o.id) "
+            "+ (SELECT count(*) FROM documents d WHERE d.organization_id = o.id) "
+            "+ (SELECT count(*) FROM tags t WHERE t.organization_id = o.id) "
+            "FROM organizations o WHERE o.id != :org_id ORDER BY o.name"
+        ),
+        {"org_id": DEFAULT_ORGANIZATION_ID},
+    ).all()
+    return {name: total for name, total in rows}
 
 
 def seed_users(session: Session) -> list[User]:
-    users = [User(email=email, display_name=name, role=role) for email, name, role in USERS]
+    users = [
+        User(email=email, display_name=name, role=role, organization_id=DEFAULT_ORGANIZATION_ID)
+        for email, name, role in USERS
+    ]
     session.add_all(users)
     session.flush()
     for i, user in enumerate(users):
@@ -122,7 +178,13 @@ def seed_users(session: Session) -> list[User]:
 
 def seed_categories(session: Session) -> list[Category]:
     categories = [
-        Category(name=name, slug=slugify(name), description=desc, default_review_period_days=period)
+        Category(
+            name=name,
+            slug=slugify(name),
+            description=desc,
+            default_review_period_days=period,
+            organization_id=DEFAULT_ORGANIZATION_ID,
+        )
         for name, desc, period in CATEGORIES
     ]
     session.add_all(categories)
@@ -131,7 +193,9 @@ def seed_categories(session: Session) -> list[Category]:
 
 
 def seed_tags(session: Session) -> list[Tag]:
-    tags = [Tag(name=name, normalized_name=name.lower()) for name in TAGS]
+    tags = [
+        Tag(name=name, normalized_name=name.lower(), organization_id=DEFAULT_ORGANIZATION_ID) for name in TAGS
+    ]
     session.add_all(tags)
     session.flush()
     return tags
@@ -179,6 +243,7 @@ def seed_documents(
             description=f"{title} — maintained by {owner.display_name}.",
             category_id=category.id,
             owner_id=owner.id,
+            organization_id=DEFAULT_ORGANIZATION_ID,
             status=DocumentStatus.ACTIVE,
             review_due_date=pick_review_due_date(review_buckets[i]),
             created_at=created_at,
@@ -197,6 +262,7 @@ def seed_documents(
             session.add(
                 ActivityEvent(
                     document_id=doc.id,
+                    organization_id=DEFAULT_ORGANIZATION_ID,
                     actor_id=reviewer.id,
                     event_type=ActivityEventType.REVIEWED,
                     summary=f"{reviewer.display_name} marked “{title}” as reviewed",
@@ -217,6 +283,7 @@ def seed_documents(
             uploader = owner if v == 1 else random.choice(employees)
             version = DocumentVersion(
                 document_id=doc.id,
+                organization_id=DEFAULT_ORGANIZATION_ID,
                 version_number=v,
                 storage_path=f"uploads/documents/{doc.id}/v{v}__{slugify(filename)}",
                 original_filename=filename,
@@ -237,6 +304,7 @@ def seed_documents(
             session.add(
                 ActivityEvent(
                     document_id=doc.id,
+                    organization_id=DEFAULT_ORGANIZATION_ID,
                     actor_id=uploader.id,
                     event_type=ActivityEventType.CREATED if v == 1 else ActivityEventType.VERSION_UPLOADED,
                     summary=(
@@ -255,8 +323,25 @@ def seed_documents(
 def main() -> None:
     with Session(engine) as session:
         with session.begin():
-            print("Truncating existing data...")
-            truncate_all(session)
+            preserved = snapshot_other_organizations(session)
+            if preserved:
+                print(
+                    "Leaving these organizations untouched: "
+                    + ", ".join(f"{name} ({count} rows)" for name, count in preserved.items())
+                )
+
+            print(f"Resetting demo organization {DEFAULT_ORGANIZATION_ID}...")
+            reset_default_organization(session)
+
+            # Inside the transaction on purpose: if the reset ever reaches
+            # outside its own tenant again, this raises and the whole thing
+            # rolls back rather than committing another organization's loss.
+            after_reset = snapshot_other_organizations(session)
+            if after_reset != preserved:
+                raise RuntimeError(
+                    "Refusing to continue — the reset touched another organization's data: "
+                    f"{preserved} -> {after_reset}"
+                )
 
             print("Seeding users...")
             users = seed_users(session)
@@ -272,16 +357,20 @@ def main() -> None:
 
         print("Done.")
 
+        # Scoped to the demo organization, not global — on a database that
+        # also holds real organizations, global counts would describe rows
+        # this script never touched.
         counts = session.execute(
             text(
                 "SELECT "
-                "(SELECT count(*) FROM users), "
-                "(SELECT count(*) FROM categories), "
-                "(SELECT count(*) FROM tags), "
-                "(SELECT count(*) FROM documents), "
-                "(SELECT count(*) FROM document_versions), "
-                "(SELECT count(*) FROM activity_events)"
-            )
+                "(SELECT count(*) FROM users WHERE organization_id = :org_id), "
+                "(SELECT count(*) FROM categories WHERE organization_id = :org_id), "
+                "(SELECT count(*) FROM tags WHERE organization_id = :org_id), "
+                "(SELECT count(*) FROM documents WHERE organization_id = :org_id), "
+                "(SELECT count(*) FROM document_versions WHERE organization_id = :org_id), "
+                "(SELECT count(*) FROM activity_events WHERE organization_id = :org_id)"
+            ),
+            {"org_id": DEFAULT_ORGANIZATION_ID},
         ).one()
         print(
             f"users={counts[0]} categories={counts[1]} tags={counts[2]} "

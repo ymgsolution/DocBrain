@@ -11,6 +11,7 @@ from app.modules.dashboard.router import router as dashboard_router
 from app.modules.documents.router import router as documents_router
 from app.modules.invitations.public_router import router as public_invitations_router
 from app.modules.invitations.router import router as invitations_router
+from app.modules.platform.router import router as platform_router
 from app.modules.reviews.router import router as reviews_router
 from app.modules.shares.public_router import router as public_shares_router
 from app.modules.shares.router import router as shares_router
@@ -47,6 +48,7 @@ app.include_router(shares_router)
 app.include_router(public_shares_router)
 app.include_router(reviews_router)
 app.include_router(dashboard_router)
+app.include_router(platform_router)
 
 
 @app.get("/api/v1/health")

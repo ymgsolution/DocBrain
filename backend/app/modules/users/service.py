@@ -35,26 +35,35 @@ class UserAdminService:
         self.repository = repository
 
     def search(
-        self, *, search: str | None = None, status: str = "active", page: int = 0, size: int = DEFAULT_PAGE_SIZE
+        self,
+        *,
+        organization_id: uuid.UUID,
+        search: str | None = None,
+        status: str = "active",
+        page: int = 0,
+        size: int = DEFAULT_PAGE_SIZE,
     ) -> tuple[list[User], int]:
         if status not in VALID_STATUSES:
             raise ValidationError(f"Status must be one of: {', '.join(VALID_STATUSES)}.")
-        return self.repository.search(search=search, status=status, page=page, size=size)
+        return self.repository.search(organization_id=organization_id, search=search, status=status, page=page, size=size)
 
-    def _get(self, user_id: uuid.UUID) -> User:
-        user = self.repository.get_by_id(user_id)
+    def _get(self, user_id: uuid.UUID, organization_id: uuid.UUID) -> User:
+        user = self.repository.get_by_id(user_id, organization_id)
         if user is None:
             raise NotFoundError("That user doesn't exist.")
         return user
 
     def deactivate(self, user_id: uuid.UUID, *, actor: User) -> User:
-        user = self._get(user_id)
+        user = self._get(user_id, actor.organization_id)
 
         if user.id == actor.id:
             raise ValidationError(
                 "You can't deactivate your own account — ask another admin to do it.",
             )
-        if user.role == UserRole.ADMIN and self.repository.count_active_admins(excluding=user.id) == 0:
+        if (
+            user.role == UserRole.ADMIN
+            and self.repository.count_active_admins(actor.organization_id, excluding=user.id) == 0
+        ):
             raise ValidationError(
                 "This is the last active admin. Promote someone else to admin first, "
                 "otherwise nobody will be able to manage the workspace.",
@@ -74,7 +83,7 @@ class UserAdminService:
         return user
 
     def reactivate(self, user_id: uuid.UUID, *, actor: User) -> User:
-        user = self._get(user_id)
+        user = self._get(user_id, actor.organization_id)
         if not user.is_active:
             user.is_active = True
             user.deactivated_at = None
@@ -84,7 +93,7 @@ class UserAdminService:
         return user
 
     def change_role(self, user_id: uuid.UUID, *, role: UserRole, actor: User) -> User:
-        user = self._get(user_id)
+        user = self._get(user_id, actor.organization_id)
 
         if user.role == role:
             return user
@@ -97,7 +106,7 @@ class UserAdminService:
         if (
             user.role == UserRole.ADMIN
             and user.is_active
-            and self.repository.count_active_admins(excluding=user.id) == 0
+            and self.repository.count_active_admins(actor.organization_id, excluding=user.id) == 0
         ):
             raise ValidationError(
                 "This is the last active admin. Promote someone else to admin first.",

@@ -38,7 +38,7 @@ class MetadataGenerationService:
             return
 
         extracted = DocumentExtractedTextRepository(db).get_by_version_id(version.id)
-        row = AiDocumentAnalysisRepository(db).get_or_create(version.id)
+        row = AiDocumentAnalysisRepository(db).get_or_create(version.id, version.organization_id)
 
         if extracted is None or extracted.status != ExtractionStatus.SUCCEEDED or not extracted.char_count:
             row.status = AiAnalysisStatus.SKIPPED

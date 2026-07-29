@@ -108,7 +108,7 @@ class ShareService:
         used to sidestep the limit the presets enforce."""
         expiry = self._resolve_expiry(expires_in_days, expires_at)
 
-        document = self.documents.get_active_by_id(document_id)
+        document = self.documents.get_active_by_id(document_id, current_user.organization_id)
         if document is None:
             raise NotFoundError("This document doesn't exist or was deleted.")
         _assert_can_share(document, current_user)
@@ -119,6 +119,7 @@ class ShareService:
         link = ShareLink(
             token_hash=hash_token(token),
             document_id=document.id,
+            organization_id=current_user.organization_id,
             # Pinned to whatever is current *now*, so a later upload can't
             # change what an external recipient sees.
             document_version_id=document.current_version_id,
@@ -128,6 +129,7 @@ class ShareService:
         self.repository.db.add(
             ActivityEvent(
                 document_id=document.id,
+                organization_id=current_user.organization_id,
                 actor_id=current_user.id,
                 event_type=ActivityEventType.SHARED,
                 summary=(
@@ -139,14 +141,14 @@ class ShareService:
         return self.repository.add(link), token
 
     def list_links(self, document_id: uuid.UUID, *, current_user: User) -> list[ShareLink]:
-        document = self.documents.get_active_by_id(document_id)
+        document = self.documents.get_active_by_id(document_id, current_user.organization_id)
         if document is None:
             raise NotFoundError("This document doesn't exist or was deleted.")
         _assert_can_share(document, current_user)
         return self.repository.list_for_document(document_id)
 
     def revoke_link(self, document_id: uuid.UUID, link_id: uuid.UUID, *, current_user: User) -> ShareLink:
-        document = self.documents.get_active_by_id(document_id)
+        document = self.documents.get_active_by_id(document_id, current_user.organization_id)
         if document is None:
             raise NotFoundError("This document doesn't exist or was deleted.")
         _assert_can_share(document, current_user)

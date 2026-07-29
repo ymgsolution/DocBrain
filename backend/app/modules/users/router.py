@@ -50,7 +50,9 @@ def list_users(
     service: UserAdminService = Depends(get_user_admin_service),
     current_user: User = Depends(require_role(UserRole.ADMIN)),
 ) -> PagedUsers:
-    items, total = service.search(search=search, status=status, page=page, size=size)
+    items, total = service.search(
+        organization_id=current_user.organization_id, search=search, status=status, page=page, size=size
+    )
     return PagedUsers(
         items=[_to_summary(u) for u in items],
         page=page,

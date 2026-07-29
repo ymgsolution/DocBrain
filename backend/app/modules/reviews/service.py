@@ -22,14 +22,25 @@ class ReviewsService:
         self.document_repository = document_repository
 
     def list_pending(
-        self, *, category_id: uuid.UUID | None, owner_id: uuid.UUID | None, page: int, size: int
+        self,
+        *,
+        organization_id: uuid.UUID,
+        category_id: uuid.UUID | None,
+        owner_id: uuid.UUID | None,
+        page: int,
+        size: int,
     ) -> tuple[list[Document], int]:
         return self.repository.list_pending(
-            category_id=category_id, owner_id=owner_id, horizon_days=REVIEW_HORIZON_DAYS, page=page, size=size
+            organization_id=organization_id,
+            category_id=category_id,
+            owner_id=owner_id,
+            horizon_days=REVIEW_HORIZON_DAYS,
+            page=page,
+            size=size,
         )
 
     def mark_reviewed(self, document_id: uuid.UUID, *, note: str | None, current_user: User) -> Document:
-        document = self.document_repository.get_active_by_id(document_id)
+        document = self.document_repository.get_active_by_id(document_id, current_user.organization_id)
         if document is None:
             raise NotFoundError("This document doesn't exist or was deleted.")
 
@@ -50,6 +61,7 @@ class ReviewsService:
         self.document_repository.db.add(
             ActivityEvent(
                 document_id=document.id,
+                organization_id=current_user.organization_id,
                 actor_id=current_user.id,
                 event_type=ActivityEventType.REVIEWED,
                 summary=summary,

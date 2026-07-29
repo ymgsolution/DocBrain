@@ -15,6 +15,8 @@ from app.ai.similarity_service import SimilarityService
 from app.db.models import Document, DocumentVectorEmbedding, DocumentVersion
 from app.db.models.enums import AiAnalysisStatus, DocumentStatus
 
+ORG_ID = uuid.uuid4()
+
 
 def _make_document(*, title: str, with_version: bool = True) -> Document:
     doc_id = uuid.uuid4()
@@ -49,10 +51,20 @@ class _FakeEmbeddingRepository:
         return self._embedding_by_version_id.get(document_version_id)
 
     def find_similar(
-        self, *, query_vector: list[float], exclude_document_id: uuid.UUID, limit: int
+        self,
+        *,
+        query_vector: list[float],
+        exclude_document_id: uuid.UUID,
+        organization_id: uuid.UUID,
+        limit: int,
     ) -> list[tuple[uuid.UUID, float]]:
         self.find_similar_calls.append(
-            {"query_vector": query_vector, "exclude_document_id": exclude_document_id, "limit": limit}
+            {
+                "query_vector": query_vector,
+                "exclude_document_id": exclude_document_id,
+                "organization_id": organization_id,
+                "limit": limit,
+            }
         )
         return self._similar_results[:limit]
 
@@ -61,30 +73,30 @@ class _FakeDocumentRepository:
     def __init__(self, *, document_by_id: dict | None = None) -> None:
         self._document_by_id = document_by_id or {}
 
-    def get_active_by_id(self, document_id: uuid.UUID) -> Document | None:
+    def get_active_by_id(self, document_id: uuid.UUID, organization_id: uuid.UUID) -> Document | None:
         return self._document_by_id.get(document_id)
 
-    def list_by_ids(self, document_ids: list[uuid.UUID]) -> list[Document]:
+    def list_by_ids(self, document_ids: list[uuid.UUID], organization_id: uuid.UUID) -> list[Document]:
         return [self._document_by_id[i] for i in document_ids if i in self._document_by_id]
 
 
 def test_returns_empty_when_document_not_found() -> None:
     service = SimilarityService(_FakeEmbeddingRepository(), _FakeDocumentRepository())
-    assert service.find_similar_documents(uuid.uuid4()) == []
+    assert service.find_similar_documents(uuid.uuid4(), organization_id=ORG_ID) == []
 
 
 def test_returns_empty_when_document_has_no_current_version() -> None:
     doc = _make_document(title="No version", with_version=False)
     documents = _FakeDocumentRepository(document_by_id={doc.id: doc})
     service = SimilarityService(_FakeEmbeddingRepository(), documents)
-    assert service.find_similar_documents(doc.id) == []
+    assert service.find_similar_documents(doc.id, organization_id=ORG_ID) == []
 
 
 def test_returns_empty_when_own_embedding_row_missing() -> None:
     doc = _make_document(title="Query doc")
     documents = _FakeDocumentRepository(document_by_id={doc.id: doc})
     service = SimilarityService(_FakeEmbeddingRepository(), documents)
-    assert service.find_similar_documents(doc.id) == []
+    assert service.find_similar_documents(doc.id, organization_id=ORG_ID) == []
 
 
 @pytest.mark.parametrize("status", [AiAnalysisStatus.PENDING, AiAnalysisStatus.FAILED, AiAnalysisStatus.SKIPPED])
@@ -95,7 +107,7 @@ def test_returns_empty_when_own_embedding_not_succeeded(status: AiAnalysisStatus
     embeddings = _FakeEmbeddingRepository(embedding_by_version_id={doc.current_version.id: embedding_row})
     documents = _FakeDocumentRepository(document_by_id={doc.id: doc})
     service = SimilarityService(embeddings, documents)
-    assert service.find_similar_documents(doc.id) == []
+    assert service.find_similar_documents(doc.id, organization_id=ORG_ID) == []
 
 
 def test_returns_ranked_hydrated_results_in_order() -> None:
@@ -117,12 +129,17 @@ def test_returns_ranked_hydrated_results_in_order() -> None:
     )
     service = SimilarityService(embeddings, documents)
 
-    results = service.find_similar_documents(query_doc.id, limit=5, min_similarity=0.0)
+    results = service.find_similar_documents(query_doc.id, organization_id=ORG_ID, limit=5, min_similarity=0.0)
 
     assert [doc.title for doc, _ in results] == ["Most similar", "Less similar"]
     assert [score for _, score in results] == [0.94, 0.68]
     assert embeddings.find_similar_calls == [
-        {"query_vector": query_vector, "exclude_document_id": query_doc.id, "limit": 5}
+        {
+            "query_vector": query_vector,
+            "exclude_document_id": query_doc.id,
+            "organization_id": ORG_ID,
+            "limit": 5,
+        }
     ]
 
 
@@ -144,7 +161,7 @@ def test_skips_a_ranked_id_that_no_longer_hydrates() -> None:
     documents = _FakeDocumentRepository(document_by_id={query_doc.id: query_doc, match.id: match})
     service = SimilarityService(embeddings, documents)
 
-    results = service.find_similar_documents(query_doc.id, min_similarity=0.0)
+    results = service.find_similar_documents(query_doc.id, organization_id=ORG_ID, min_similarity=0.0)
 
     assert [doc.title for doc, _ in results] == ["Still here"]
 
@@ -167,7 +184,7 @@ def test_filters_out_matches_below_min_similarity() -> None:
     )
     service = SimilarityService(embeddings, documents)
 
-    results = service.find_similar_documents(query_doc.id, min_similarity=0.8)
+    results = service.find_similar_documents(query_doc.id, organization_id=ORG_ID, min_similarity=0.8)
 
     assert [doc.title for doc, _ in results] == ["Strong match"]
 
@@ -187,7 +204,7 @@ def test_returns_empty_when_all_matches_below_min_similarity() -> None:
     documents = _FakeDocumentRepository(document_by_id={query_doc.id: query_doc, weak_match.id: weak_match})
     service = SimilarityService(embeddings, documents)
 
-    assert service.find_similar_documents(query_doc.id, min_similarity=0.8) == []
+    assert service.find_similar_documents(query_doc.id, organization_id=ORG_ID, min_similarity=0.8) == []
 
 
 def test_default_threshold_falls_back_to_settings() -> None:
@@ -209,4 +226,4 @@ def test_default_threshold_falls_back_to_settings() -> None:
     documents = _FakeDocumentRepository(document_by_id={query_doc.id: query_doc, weak_match.id: weak_match})
     service = SimilarityService(embeddings, documents)
 
-    assert service.find_similar_documents(query_doc.id) == []
+    assert service.find_similar_documents(query_doc.id, organization_id=ORG_ID) == []

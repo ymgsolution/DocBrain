@@ -103,7 +103,7 @@ def list_invitations(
     service: InvitationService = Depends(get_invitation_service),
     current_user: User = Depends(require_role(UserRole.ADMIN)),
 ) -> list[InvitationSummary]:
-    return [_to_summary(i) for i in service.list_all()]
+    return [_to_summary(i) for i in service.list_all(current_user.organization_id)]
 
 
 @router.delete("/{invitation_id}", response_model=InvitationSummary)
@@ -112,4 +112,4 @@ def revoke_invitation(
     service: InvitationService = Depends(get_invitation_service),
     current_user: User = Depends(require_role(UserRole.ADMIN)),
 ) -> InvitationSummary:
-    return _to_summary(service.revoke(invitation_id))
+    return _to_summary(service.revoke(invitation_id, current_user.organization_id))

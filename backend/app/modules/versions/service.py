@@ -64,7 +64,7 @@ class VersionService:
     def upload_version(
         self, document_id: uuid.UUID, *, file: UploadFile, change_note: str, current_user: User
     ) -> DocumentVersion:
-        document = self.repository.get_document_for_update(document_id)
+        document = self.repository.get_document_for_update(document_id, current_user.organization_id)
         if document is None or document.status != DocumentStatus.ACTIVE:
             raise NotFoundError("This document doesn't exist or was deleted.")
         _assert_can_upload_version(document, current_user)
@@ -88,6 +88,7 @@ class VersionService:
 
             version = DocumentVersion(
                 document_id=document.id,
+                organization_id=current_user.organization_id,
                 version_number=version_number,
                 storage_path=storage_path,
                 storage_provider=self.storage.provider_name,
@@ -105,12 +106,19 @@ class VersionService:
             self.repository.db.add(
                 ActivityEvent(
                     document_id=document.id,
+                    organization_id=current_user.organization_id,
                     actor_id=current_user.id,
                     event_type=ActivityEventType.VERSION_UPLOADED,
                     summary=f"{current_user.display_name} uploaded version {version_number} of “{document.title}”",
                 )
             )
-            self.repository.db.add(AiJob(job_type=AiJobType.EXTRACT, document_version_id=version.id))
+            self.repository.db.add(
+                AiJob(
+                    job_type=AiJobType.EXTRACT,
+                    document_version_id=version.id,
+                    organization_id=current_user.organization_id,
+                )
+            )
 
             self.repository.db.commit()
         except Exception:
@@ -125,7 +133,7 @@ class VersionService:
     def restore_version(
         self, document_id: uuid.UUID, version_number: int, *, change_note: str | None, current_user: User
     ) -> DocumentVersion:
-        document = self.repository.get_document_for_update(document_id)
+        document = self.repository.get_document_for_update(document_id, current_user.organization_id)
         if document is None or document.status != DocumentStatus.ACTIVE:
             raise NotFoundError("This document doesn't exist or was deleted.")
         _assert_can_upload_version(document, current_user)
@@ -156,6 +164,7 @@ class VersionService:
 
         version = DocumentVersion(
             document_id=document.id,
+            organization_id=current_user.organization_id,
             version_number=new_version_number,
             storage_path=new_storage_path,
             storage_provider=self.storage.provider_name,
@@ -174,6 +183,7 @@ class VersionService:
         self.repository.db.add(
             ActivityEvent(
                 document_id=document.id,
+                organization_id=current_user.organization_id,
                 actor_id=current_user.id,
                 event_type=ActivityEventType.VERSION_RESTORED,
                 summary=(
@@ -187,7 +197,13 @@ class VersionService:
         # for uniformity (every new document_versions row gets exactly one
         # EXTRACT job, no special-casing) rather than reusing `source`'s
         # extraction result. Cheap to re-run; not an AI call.
-        self.repository.db.add(AiJob(job_type=AiJobType.EXTRACT, document_version_id=version.id))
+        self.repository.db.add(
+            AiJob(
+                job_type=AiJobType.EXTRACT,
+                document_version_id=version.id,
+                organization_id=current_user.organization_id,
+            )
+        )
         self.repository.db.commit()
         self.repository.db.refresh(version)
         return version

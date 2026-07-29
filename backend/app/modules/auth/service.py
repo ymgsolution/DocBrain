@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime
 
 from app.core.exceptions import UnauthorizedError
@@ -16,8 +17,8 @@ class AuthService:
     def __init__(self, repository: AuthRepository) -> None:
         self.repository = repository
 
-    def list_personas(self) -> list[User]:
-        return self.repository.list_active_users()
+    def list_personas(self, organization_id: uuid.UUID) -> list[User]:
+        return self.repository.list_active_users(organization_id)
 
     def login(self, email: str, password: str) -> tuple[str, datetime, User]:
         """One error message for every failure — unknown email, wrong
@@ -37,7 +38,7 @@ class AuthService:
         if user is None or not user.is_active or not user.password_hash or not password_ok:
             raise UnauthorizedError("That email and password don't match an account.")
 
-        token, expires_at = create_access_token(user.id, user.role.value)
+        token, expires_at = create_access_token(user.id, user.role.value, user.organization_id)
         return token, expires_at, user
 
     def get_preferences(self, user: User) -> UserPreference:

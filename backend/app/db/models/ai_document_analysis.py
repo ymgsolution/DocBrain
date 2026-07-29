@@ -36,6 +36,13 @@ class AiDocumentAnalysis(Base):
     __tablename__ = "ai_document_analysis"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # NOT NULL as of the Phase 4 migration (8ebd25762f70). Defense-in-depth:
+    # the same "join through document_versions to reach the owning org" shape
+    # that let the pre-migration similarity search leak across tenants
+    # (docs/MULTI-TENANT-ARCHITECTURE-REVIEW.md).
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
     document_version_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("document_versions.id", ondelete="CASCADE"),
