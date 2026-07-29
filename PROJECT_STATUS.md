@@ -1,12 +1,14 @@
 # DocBrain Project Status
 
-**Live:** frontend https://docbrain-pa.vercel.app · API https://docbrain-production-00e4.up.railway.app — both verified 2026-07-28, including real password login, admin user management, and an invitation email delivered from `noreply@ymgsolution.com` (confirmed `delivered` in Resend's own log). Note `PUBLIC_APP_URL` on **both** Railway services must track the frontend domain; if it drifts, every newly generated share link points at the wrong host (the URL is built at creation time, not stored).
+**Live:** frontend https://docbrain-pa.vercel.app · API https://docbrain-production-00e4.up.railway.app — both verified 2026-07-29, including multi-tenant isolation between two real organizations, the platform-admin area, real password login, admin user management, and an invitation email delivered from `noreply@ymgsolution.com` (confirmed `delivered` in Resend's own log). Note `PUBLIC_APP_URL` on **both** Railway services must track the frontend domain; if it drifts, every newly generated share link points at the wrong host (the URL is built at creation time, not stored).
 
-> **⚠️ One database serves both local development and production.** `backend/.env` points at the same Supabase Postgres Railway uses. Running `alembic upgrade head` locally migrates *production*, and if the deployed branch doesn't yet contain that revision file, the API crash-loops on `Can't locate revision identified by ...`. This has happened once for real (2026-07-28, revision `3711e1bdb61b`). **Always merge and deploy the code before, or at the same time as, running a migration locally.** A separate Supabase project for local work is the real fix — see §10 Open.
+> **⚠️ One database serves both local development and production.** `backend/.env` points at the same Supabase Postgres Railway uses. Running `alembic upgrade head` locally migrates *production*, and if the deployed branch doesn't yet contain that revision file, the API crash-loops on `Can't locate revision identified by ...`. **Always merge and deploy the code before, or at the same time as, running a migration locally.** A separate Supabase project for local work is the real fix — see §10 Open.
+>
+> This has now bitten twice. First on 2026-07-28 (revision `3711e1bdb61b`) — an immediate crash-loop. Second during the multi-tenant migration: the four organization migrations through `a3b7efaeff2c` were applied locally while the code sat unmerged on a feature branch, and the failure was *quieter and worse*. The running container never restarted, so reads kept working and the API looked healthy — but `organization_id` was now `NOT NULL` with no default while the deployed models didn't know the column existed, so **every write to all 11 tenant-scoped tables failed in production** (upload, categories, tags, invitations, share links), and the next restart would have crash-looped on the missing revision. Found by audit on 2026-07-29, not by an alert; resolved by merging and deploying. **The lesson beyond the existing rule: a green `/health` and a working login prove nothing about writes when schema and code disagree.**
 
 > **This is the single source of truth for the project.** It must be updated whenever a feature is added, modified, refactored, removed, or completed. See [Important Rules](#important-rules) at the bottom.
 
-**Last updated:** 2026-07-29 (Railway moved to Singapore — dashboard 7.1s → 1.85s; three infrastructure items reviewed and deferred by decision). Previously 2026-07-28: real invite-only authentication in four phases, admin user management, share-link revocation gap closed, backend suite at 178 tests. See §13 Change Log for the full sequence.
+**Last updated:** 2026-07-29 (**multi-tenancy shipped** — organizations, per-tenant isolation across every query, a platform-admin area for managing organizations, three bugs found by using it, and a model/schema alignment pass; merged to `develop` and verified live in production. Backend suite at 211 tests). Earlier the same day: Railway moved to Singapore — dashboard 7.1s → 1.85s; three infrastructure items reviewed and deferred by decision. Previously 2026-07-28: real invite-only authentication in four phases, admin user management, share-link revocation gap closed. See §13 Change Log for the full sequence.
 
 ---
 
@@ -19,7 +21,7 @@
 | **Hackathon** | Ahmedabad AI Hackathon #5 — "Smart Document Manager" problem statement |
 | **Current Technology Stack** | Frontend: Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind CSS v4 + shadcn/ui (Base UI primitives, not Radix) + TanStack Query + React Hook Form + Zod + next-themes + Lucide icons. Backend: Python 3.11+ / FastAPI, managed with `uv`. Database: Supabase Postgres (free tier), accessed directly via SQLAlchemy (not Supabase's client SDK/PostgREST). Storage: **Supabase Storage** via its S3-compatible API (boto3), behind a swappable `StoragePort`; the local-filesystem adapter still exists and is what the test suite runs against. Auth: **real passwords** (argon2id via `pwdlib`), invite-only account creation, with signed JWTs held in an httpOnly cookie set by a Next.js route handler. Email: Resend behind an `EmailSender` port. |
 | **Current Architecture** | Backend: layered (router → service → repository), package-by-feature under `app/modules/`. Frontend: feature-first (`src/features/`) for business logic + a BFF proxy (`/api/bff/[...path]`) that turns the httpOnly session cookie into a `Bearer` header before forwarding to FastAPI — the browser never sees the JWT. |
-| **Deployment** | **Live.** Frontend → Vercel (production branch is `develop`, not `main` — `main` is vestigial and ~16 commits behind). API + AI worker → Railway, one Docker image with different start commands. Database + file storage → Supabase. Email → Resend on the verified domain `ymgsolution.com`. Pushing to `develop` auto-deploys both halves. |
+| **Deployment** | **Live.** Frontend → Vercel (production branch is `develop`, not `main` — `main` is vestigial and ~36 commits behind). API + AI worker → Railway, one Docker image with different start commands. Database + file storage → Supabase. Email → Resend on the verified domain `ymgsolution.com`. Pushing to `develop` auto-deploys both halves. |
 
 Full architecture rationale lives in [docs/DOCBRAIN-ARCHITECTURE.md](docs/DOCBRAIN-ARCHITECTURE.md) (authoritative; supersedes `docs/PHASE-1-ARCHITECTURE.md`, which is kept only for its product-thinking sections).
 
@@ -32,13 +34,15 @@ Full architecture rationale lives in [docs/DOCBRAIN-ARCHITECTURE.md](docs/DOCBRA
 - ✅ Database Design
 - ✅ Backend Foundation
 - ✅ Backend APIs (all modules from §9.1 of the architecture doc are built and manually verified)
-- ✅ Testing — **178 backend tests**, run against the real Postgres schema inside a rolled-back transaction (verified to leave zero rows). Covers auth, invitations, password reset, admin user management, documents, versions, reviews/trash, shares, storage adapters and the AI track. No frontend component tests yet — verification there is `tsc` + `eslint` + a production build + driving the running app.
+- ✅ Testing — **211 backend tests**, run against the real Postgres schema inside a rolled-back transaction (verified to leave zero rows). Covers auth, invitations, password reset, admin user management, documents, versions, reviews/trash, shares, storage adapters, the AI track, **cross-tenant isolation (16 tests) and the platform-admin area (14 tests)**. No frontend component tests yet — verification there is `tsc` + `eslint` + a production build + driving the running app.
 - ✅ Frontend Phase 4 — **complete** (Phase 4.1 — Application Shell. 4.2 — Dashboard. 4.3 — Document Explorer. 4.4 — Upload Document. 4.5 — Document Details. 4.6 — Version History. 4.7 — Categories Admin. 4.8 — Tags Admin. 4.9 — Settings: profile (read-only), theme toggle, default page size — both preferences genuinely wired into the app, not just stored: theme persists across login and the Explorer's page size actually reads the saved value. Every screen from §6 (S1–S10) is now built and verified end-to-end in a real browser. Phase 5 (Integration hardening) and Phase 6 (Testing) are next per the roadmap — see §11)
 - ✅ Pending Reviews UI + Trash UI (§6.7/§6.8) — the two remaining documented screens (S6, S8) that sat outside the strict 4.1–4.9 module order. `/reviews` (Reviewer/Admin queue, filters, mark-as-reviewed) and `/trash` (all users, owner-or-Admin scoped, restore + Admin-only type-to-confirm permanent delete). Found and fixed a backend gap along the way: there was no way to list trashed documents at all — added `GET /api/v1/documents/trash`.
 - ✅ Phase 5 — Integration (§19.6) — an audit pass, not new construction: verified the canonical J2 flow (§4.3, Upload→Categorize→Search→View→Update Version→Dashboard Refresh) works end-to-end without touching a terminal, then systematically audited every screen's error handling against §16.5's HTTP-status contract via a dedicated research pass, closing the real gaps it found — see §3 and §9 for the full list (422/409 field-level errors now map onto the actual form field instead of a generic toast, the XHR upload path now redirects on 401 like every other request, a logic bug in Version History's conflict handling was fixed, and the app finally has styled `not-found.tsx`/`error.tsx` instead of falling through to Next's defaults).
 - ✅ **AI feature track (new, separate from the §19 hackathon roadmap)** — live and user-facing, not shadow mode. Text extraction (classic parsing) → Smart Rename/Tags/Summary (`AiSuggestionsCard` on Document Details, real Gemini calls via `GeminiProvider`) → Similar Document Detection (`document_vector_embeddings` + `pgvector`, `SimilarityService`, `GET /documents/{id}/similar`, `SimilarDocumentsCard`) are all built, wired into the persistent worker (`app/ai_jobs/main.py`), and verified end-to-end against real data. `AIProvider`/`EmbeddingProvider` stay swappable Protocols; `generate_text` (chat/RAG) is the one remaining stub. No review UI yet for AI suggestions (the `accepted`/`edited` columns exist for it, unused). Next candidates: a review UI, Duplicate Detection / Semantic Search (both designed to reuse the existing `SimilarityService` as-is), or RAG chat.
 - ✅ **Real authentication (invite-only)** — replaced the mock persona picker. Password login with argon2id, admin-issued invitations as the only route to an account, self-service password reset, and transactional email via Resend. Four phases, all live. See §3.
 - ✅ **Admin user management** — deactivate / reactivate / change role, with search, status filter and paging, on a single **People** page (Members + Invitations tabs). Deactivation is immediate (the user row is re-read every request) and also revokes reach: outstanding reset tokens are consumed and the person's share links stop resolving. See §3.
+- ✅ **Multi-tenancy (single-tenant → pooled multi-tenant)** — the app now serves multiple organizations from one database, with isolation enforced in the backend on every query rather than trusted from the client. `organization_id` is denormalized directly onto all 11 tenant-scoped tables (not derived through join chains), `NOT NULL` since migration `8ebd25762f70`. Six phases, all live and verified in production against two real organizations. See §3.
+- ✅ **Platform admin (super admin)** — a separate `platform_admins` table with its own JWT shape, cookie, BFF proxy and `/platform` frontend area, deliberately *not* a role on `users`. Creates organizations (with their first admin and a default category set) and reports per-organization user/document counts. See §3.
 - ✅ Deployment — live on Vercel + Railway + Supabase + Resend; pushes to `develop` auto-deploy.
 
 ---
@@ -502,15 +506,67 @@ An audit pass, not new construction — every screen was already wired to the re
   - Completed: 2026-07-28
   - Notes: 28 new tests (178 total). Verified end to end against the running stack *through the frontend proxy* — deactivate → login 401 → gone from the directory → reactivate → login 200 — then every account touched was restored and the table re-queried to confirm.
 
+### Multi-Tenancy — Single-Tenant → Pooled Multi-Tenant (6 phases)
+
+Full reasoning in [docs/MULTI-TENANT-ARCHITECTURE-REVIEW.md](docs/MULTI-TENANT-ARCHITECTURE-REVIEW.md) (16 parts, written before any code changed).
+
+- **Pooled model, one shared database** — every organization's rows live in the same tables, separated logically by `organization_id`. Chosen over schema-per-tenant or database-per-tenant: this app's tenants are small and numerous, and the alternatives multiply migration cost by tenant count for isolation this codebase can enforce in one place.
+- **`organization_id` denormalized onto all 11 tenant-scoped tables** — `documents`, `document_versions`, `categories`, `tags`, `users`, `invitations`, `share_links`, `activity_events`, `ai_jobs`, `ai_document_analysis`, `document_vector_embeddings`. Stored directly rather than derived through a join chain, because the join chain is exactly what let the pre-migration similarity search compare across tenants. `document_extracted_text` deliberately has none — it hangs off `document_versions` and is never queried independently.
+  - Completed: 2026-07-29 (Phases 1–2 — table + nullable columns + backfill)
+- **Isolation enforced in the backend, never trusted from the client** — no request carries an organization id. Every query filters on `current_user.organization_id`, re-read from the database on each request (same posture already used for role, so a change takes effect immediately). The JWT carries `org_id` only as a display convenience, never as an authorization input.
+  - Completed: 2026-07-29 (Phases 3–4)
+- **Per-organization vocabularies** — `categories.slug` and `tags.normalized_name` moved from globally unique to unique *per organization*, so two organizations can each have their own "General" category or "urgent" tag.
+  - Completed: 2026-07-29 (Phase 4, migration `8ebd25762f70`)
+- **Organization name in the UI** — sidebar header and user-menu dropdown.
+  - Completed: 2026-07-29 (Phase 5)
+- **Cross-tenant isolation test suite** — 16 tests in `tests/api/test_multi_tenant_isolation.py`, the actual acceptance criteria for the migration. Every other test file implicitly runs inside one organization and would never notice a missing filter, because there was no second organization's data to leak. Covers list/get/update/delete documents, similarity search (two documents with *identical* embedding vectors — the strongest possible cross-tenant pull), categories, pending reviews, dashboard totals, share links, user administration, the colleague directory, and invitation accept.
+  - Completed: 2026-07-29 (Phase 6)
+  - Notes: verified in production against two real organizations — Accenture sees 19 documents, Infosys 2, zero overlap, and fetching one org's document with the other's token returns 404.
+
+### Platform Admin (Super Admin)
+
+- **A separate `platform_admins` table, not a role on `users`** — the central design decision. Adding a `SUPER_ADMIN` role to `users` would have forced `organization_id` to stay nullable on that table, weakening the one guarantee the whole isolation model rests on. A platform admin instead has no organization at all, by construction.
+- **Its own auth path end to end** — separate JWT shape (`typ: "platform_admin"`), separate dependency (`get_current_platform_admin`), separate cookie (`docbrain_platform_token`), separate BFF proxy (`/api/platform-bff/[...path]`), separate `/platform` frontend area. A normal user token is rejected by platform endpoints and vice versa.
+  - Completed: 2026-07-29 (Phases A–B)
+- **Organization management** — `GET /platform/organizations` (with per-organization user and document counts), `POST /platform/organizations`, `POST /platform/organizations/{id}/admins`. Counts only: a platform admin sees *how much* an organization holds, never document titles or contents.
+  - Completed: 2026-07-29 (Phase C)
+- **New organizations are seeded with a working default category set** — `General` (180-day review period), `Finance` (90), `HR` (365), `Legal` (365), `Operations` (180), created in the same transaction as the organization row so a half-initialized organization is impossible.
+  - Completed: 2026-07-29 (Phase C, hardened by the two bugs below)
+- **Frontend** — `/platform/login` and `/platform`, with create-organization and create-first-admin dialogs.
+  - Completed: 2026-07-29 (Phase D)
+  - Notes: 14 tests in `tests/api/test_platform_admin.py`, covering the boundary between the two auth systems and the full bootstrap flow. Bootstrap admin is created by `scripts/create_platform_admin.py`.
+
+### Bugs Found by Using the Multi-Tenant System (3)
+
+All three share one shape, worth remembering: **Accenture's data came from the Phase 2 backfill, so it had history that made features appear to work while the code paths that *create* that history were broken or missing.** A new organization exposed each one.
+
+- **New organizations had zero categories** — upload requires a category, so a brand-new organization could not upload anything at all. `create_organization` only inserted the organization row; Accenture's 13 categories existed solely because the backfill migration retroactively assigned them. Fixed by seeding a default set.
+  - Completed: 2026-07-29 (`2c70cea`)
+- **Marking a document reviewed silently didn't advance the due date** — the fix above seeded categories with no `default_review_period_days`, and `mark_reviewed` only advances `review_due_date` when the category defines a period. The API returned success, the date never moved, and the document stayed "Due Soon". Fixed by giving each default category a period.
+  - Completed: 2026-07-29 (`1c50cf1`)
+- **All AI generation failed for every organization** — `AiDocumentAnalysisRepository.get_or_create` and `DocumentVectorEmbeddingRepository.get_or_create` built their row without `organization_id`, which had become `NOT NULL`. Reported as "AI doesn't work for Infosys", but investigation showed Accenture's newest document failed identically; only its *pre-migration* rows still had data, which disguised it. Every `GENERATE_METADATA`/`GENERATE_EMBEDDING` job had been failing since the migration, retried 5 times, then marked permanently failed — silently, because the worker degrades gracefully by design. Fixed, the 8 stuck jobs were reset and reprocessed, and both organizations now generate real suggestions and embeddings.
+  - Completed: 2026-07-29 (`7b9b696`)
+
+### Model/Schema Alignment (the fix that makes that third bug class visible)
+
+- **The ORM models still described the pre-migration schema.** All 11 declared `organization_id` as nullable, and `categories.slug`/`tags.normalized_name` still claimed global uniqueness. Two consequences, one latent and severe:
+  1. Omitting `organization_id` in a constructor was legal to Python and mypy, so the failure only appeared at runtime inside a worker that swallows errors — exactly how the AI bug shipped. mypy went from 46 errors to 3; 43 were this one cause.
+  2. `alembic revision --autogenerate` had become **actively destructive**: the next run would have emitted a migration dropping `NOT NULL` across all 11 tables, restoring global uniqueness, and dropping three indexes created with raw `op.execute()` that the models therefore never declared — the pgvector HNSW index behind similarity search, the GIN index behind full-text search, and the partial index behind the Explorer listing.
+- **Fixed by correcting the declarations, with no migration and no data change** — the database already enforced all of it. Those three indexes are now declared in `__table_args__` for exactly this reason. Verified by generating a throwaway autogenerate and confirming it produced an empty `upgrade()`/`downgrade()`.
+  - Completed: 2026-07-29 (`9b7dd89`)
+
 ---
 
 ## 4. Pending Features
 
 ### High Priority
 
-*(Phase 4 — Frontend — is complete, and so are the two S6/S8 screens that sat outside its module order. What's below is everything else in the roadmap, not yet prioritized into a phase.)*
+*(Phase 4 — Frontend — is complete, and so are the two S6/S8 screens that sat outside its module order. The backend test suite (roadmap Phase 6) is done at 211 tests. What's below is everything else in the roadmap, not yet prioritized into a phase.)*
 
-- Automated backend test suite (`pytest`) — unit tests for permission checks, version allocation, search ranking; one integration test covering the full upload→version→search→download loop (roadmap Phase 6)
+- **Frontend tests** — still nothing at all. Verification is `tsc` + `eslint` + a production build + driving the running app by hand.
+- **Validate `owner_id` on document update** — `update_metadata` assigns `document.owner_id` with no lookup, while the `category_id` and `tag_names` branches around it both scope to `current_user.organization_id`. A missed spot in the Phase 4 isolation sweep. Not exploitable today (no endpoint reachable by a normal user exposes another organization's user UUIDs), but a stale UUID also produces a 500 rather than a 400 since `IntegrityError` isn't handled. See §10.
+- **Isolation-test coverage for versions, tags and trash** — the 16-test suite covers documents, similarity, categories, reviews, dashboard, shares, users and invitations, but not those three. Tags matter most, since they moved from a global to a per-organization vocabulary.
+- **Two maintenance scripts are broken on post-multi-tenancy signatures** — `scripts/delete_dummy_documents.py` (calls `get_active_by_id` without an organization) and `scripts/backfill_extraction_jobs.py` (calls `enqueue` without one). Both `TypeError` on run. Neither is part of any routine flow.
 
 ### Low Priority
 
@@ -549,9 +605,10 @@ DocBrain/
 │   │   │                           # exceptions, error_handlers, middleware (correlation ID), logging
 │   │   ├── db/
 │   │   │   ├── base.py / session.py
-│   │   │   └── models/             # user, category, document, document_version, tag,
-│   │   │                           # activity_event, user_preference, ai_job,
-│   │   │                           # document_extracted_text, ai_document_analysis, enums
+│   │   │   └── models/             # organization, platform_admin, user, category, document,
+│   │   │                           # document_version, tag, activity_event, user_preference,
+│   │   │                           # ai_job, document_extracted_text, ai_document_analysis,
+│   │   │                           # document_vector_embedding, share_link, invitation, enums
 │   │   ├── schemas/                # Pydantic DTOs: auth, document, version, taxonomy,
 │   │   │                           # review, trash, dashboard, mappers.py (ORM → DTO)
 │   │   ├── modules/                # package-by-feature
@@ -570,6 +627,10 @@ DocBrain/
 │   │   │   ├── taxonomy/            (router, service, repository)
 │   │   │   ├── reviews/             (router, service, repository)
 │   │   │   ├── shares/              (router, public_router, service, repository, tokens)
+│   │   │   ├── platform/            (super-admin area — router, organizations_service,
+│   │   │   │                        #   organizations_repository, admins_service, schemas.
+│   │   │   │                        #   /api/v1/platform/*; its own auth, never mixed
+│   │   │   │                        #   with the tenant-facing modules above)
 │   │   │   └── dashboard/           (router, service, repository)
 │   │   ├── email/                   # EmailSender port + Resend/logging adapters, messages.py
 │   │   ├── storage/                 # StoragePort, Local + Supabase adapters, factory, checksum
@@ -643,6 +704,9 @@ DocBrain/
     │   │   │   ├── trash/page.tsx           # Trash (S8) — all users, server-side owner-or-Admin scoping
     │   │   │   └── settings/page.tsx        # Settings (Phase 4.9) — profile, theme, page size —
     │   │   │                                #   Phase 4 complete after this
+    │   │   ├── platform/                      # super-admin area, OUTSIDE the (app) group:
+    │   │   │   ├── login/page.tsx             #   its own login, own cookie, own layout —
+    │   │   │   └── page.tsx                   #   organization list + create org/first admin
     │   │   ├── invite/[token]/page.tsx        # accept an invitation (no session required)
     │   │   ├── reset-password/[token]/page.tsx # set a new password from an emailed link
     │   │   ├── (auth)/forgot-password/page.tsx # request a reset link
@@ -651,7 +715,11 @@ DocBrain/
     │   │       ├── auth/logout/route.ts   # clears it
     │   │       ├── public/[...path]/route.ts # NEVER reads the session cookie — keeps the
     │   │       │                             #   unauthenticated surface structurally separate
-    │   │       └── bff/[...path]/route.ts # cookie -> Bearer header proxy to FastAPI
+    │   │       ├── bff/[...path]/route.ts # cookie -> Bearer header proxy to FastAPI
+    │   │       ├── platform-auth/login/route.ts   # sets the SEPARATE platform-admin cookie
+    │   │       ├── platform-auth/logout/route.ts  #   (docbrain_platform_token)
+    │   │       └── platform-bff/[...path]/route.ts # its own proxy — a tenant session cookie
+    │   │                                           #   can never reach a /platform endpoint
     │   ├── components/
     │   │   ├── ui/                  # 23 shadcn primitives (Base UI, not Radix)
     │   │   ├── layout/              # Sidebar, Topbar, UserMenu, ThemeToggle, AppBreadcrumb, nav-items.ts
@@ -687,6 +755,9 @@ DocBrain/
     │   │   │                        #   mark-as-reviewed is reused from features/documents/
     │   │   ├── trash/               # types.ts, api.ts, hooks.ts — GET /documents/trash only;
     │   │   │                        #   restore/hardDelete are reused from features/documents/
+    │   │   ├── platform/            # types.ts, api.ts, hooks.ts + components/ (PlatformLoginForm,
+    │   │   │                        #   CreateOrganizationDialog, CreateFirstAdminDialog).
+    │   │   │                        #   Talks to /api/platform-bff, never /api/bff
     │   │   └── dashboard/           # types.ts, api.ts, hooks.ts,
     │   │                            # components/ (KpiSection, CategoryDistribution,
     │   │                            #   DocumentListCard, ActivityFeed, PendingReviewsBanner,
@@ -717,15 +788,19 @@ DocBrain/
 
 **Hosted on:** Supabase Postgres (free tier), accessed directly via SQLAlchemy — no PostgREST/client SDK.
 
-### Tables (15, plus `alembic_version`)
+### Tables (17, plus `alembic_version`)
+
+**Eleven of these are tenant-scoped** — `users`, `categories`, `documents`, `document_versions`, `tags`, `activity_events`, `ai_jobs`, `ai_document_analysis`, `document_vector_embeddings`, `share_links`, `invitations` — each carrying a `NOT NULL organization_id` with its own index and an `ON DELETE RESTRICT` FK. Six deliberately do not: `organizations` and `platform_admins` (the tenant table and the global one), `document_extracted_text` (derives it from its parent `document_version`), `document_tags` (a join table between two already-scoped rows), and `user_preferences`/`password_reset_tokens` (hang off a single user).
 
 | Table | Purpose |
 |---|---|
+| `organizations` | *(Multi-tenancy)* The tenant. `name` + unique `slug`. Accenture is the original, seeded with the fixed id `00000000-0000-0000-0000-000000000001` so the Phase 2 backfill had a deterministic target. Every tenant-scoped FK is `ON DELETE RESTRICT` — an organization cannot be deleted out from under its own data. |
+| `platform_admins` | *(Platform admin)* Deliberately separate from `users` and with no `organization_id` at all. Making super-admin a *role* on `users` would have forced that table's `organization_id` to stay nullable, which is the guarantee the entire isolation model rests on. Own email/password_hash; issues a JWT with a `typ: "platform_admin"` claim that normal endpoints reject. |
 | `users` | Identities; role = EMPLOYEE / REVIEWER / ADMIN. `password_hash` (argon2id) is **nullable** — an invited person exists before they set one. `is_active` gates both login and every authenticated request; `deactivated_at`/`deactivated_by` record who cut someone off and when. Never deleted to revoke access — see §3. |
-| `categories` | Controlled vocabulary; case-insensitive unique name, optional default review period |
+| `categories` | Controlled vocabulary; case-insensitive unique name **per organization**, optional default review period |
 | `documents` | Logical document identity; owns `search_vector`, `current_version_id`, review/trash state |
 | `document_versions` | Append-only version history; unique `(document_id, version_number)` |
-| `tags` / `document_tags` | Normalised tags + join table (composite PK) |
+| `tags` / `document_tags` | Normalised tags + join table (composite PK). `normalized_name` is unique **per organization**, so each organization owns its own tag vocabulary |
 | `activity_events` | Append-only audit trail |
 | `user_preferences` | Theme, page size |
 | `document_extracted_text` | *(AI feature track, pre-Gemini)* One row per `document_version_id` (unique FK) — a pointer (`extracted_text_path`) + status/method/char_count/error, never the text content itself. Content lives on disk as a `.txt` sibling of the source file. |
@@ -751,8 +826,9 @@ DocBrain/
 - `users` → `password_reset_tokens` — 1:N, `ON DELETE CASCADE`
 - `users.deactivated_by` → `users.id` — self-referential, `ON DELETE SET NULL`. Exposed on the ORM as a `deactivator` relationship with `remote_side`/`foreign_keys` spelled out, because SQLAlchemy can't infer which end of a `users`→`users` FK a side belongs to
 - **Eleven FKs point at `users`, and two of them make deletion impossible in practice** — `documents.owner_id` is `ON DELETE RESTRICT` (Postgres refuses outright), and `activity_events.actor_id` / `document_versions.uploaded_by` are NOT NULL with no cascade. This is the structural reason revoking access is `is_active = false`, not a `DELETE`
+- `organizations` → all 11 tenant-scoped tables — 1:N, every one `ON DELETE RESTRICT`. Deleting an organization therefore requires clearing its rows first, in child-first order; there is no cascade and deliberately no delete endpoint
 
-### Migrations (12, all applied)
+### Migrations (16, all applied)
 
 1. `d3070d18c042_initial_schema` — all 8 original tables, indexes, and the 4 triggers.
 2. `e97f9d207d17_fix_restored_from_version_id_ondelete_` — bug fix (see §10 Known Issues).
@@ -766,10 +842,14 @@ DocBrain/
 10. `b6bbfef32e8d_add_invitations_table` — `invitations`. Note `postgresql.ENUM(..., create_type=False)` is required to reuse the existing `user_role` type; a generic `sa.Enum` silently drops it.
 11. `3711e1bdb61b_add_password_reset_tokens_table` — `password_reset_tokens`. **This is the revision that crash-looped Railway on 2026-07-28** — applied to the shared database from a laptop while `develop` still lacked the file. See the warning at the top of this document.
 12. `b44952831669_add_deactivated_at_and_deactivated_by_` — `users.deactivated_at` + `users.deactivated_by` (self-referential FK, `ON DELETE SET NULL` so an admin leaving neither blocks nor erases the record of people they deactivated).
+13. `8d789bcfb44f_add_organizations_table` — `organizations`, plus the seeded Accenture row at the fixed default id. Purely additive; nothing referenced it yet (multi-tenant Phase 1).
+14. `7bbf96ca24d8_add_nullable_organization_id_columns_` — adds `organization_id` to all 11 tenant-scoped tables as **nullable**, and backfills every existing row to Accenture. Deliberately split from the `NOT NULL` step so application code could be updated in between without a window where writes fail (multi-tenant Phase 2).
+15. `8ebd25762f70_enforce_organization_id_not_null_and_` — flips all 11 columns to `NOT NULL` and swaps the global uniqueness on `categories.slug` / `tags.normalized_name` for per-organization composites (`uq_categories_organization_id_slug`, `ux_categories_organization_id_name_lower`, `uq_tags_organization_id_normalized_name`). **The consequential one**: from here on, any code path that doesn't supply `organization_id` fails at insert time — which is exactly how the AI-generation bug surfaced, and why the ORM models had to be brought into line (see §3).
+16. `a3b7efaeff2c_add_platform_admins_table` — `platform_admins`. Additive and unreferenced by any tenant table.
 
 ### Seed Data
 
-Run via `uv run python -m scripts.seed` (idempotent — truncates first). Current state as of last check:
+Run via `uv run python -m scripts.seed` (idempotent, and **scoped to the demo organization**). Current state as of last check:
 
 | Table | Rows |
 |---|---|
@@ -784,6 +864,10 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 **Note (2026-07-25):** the *live* dev DB no longer matches this table — 52 of the seeded documents (the ones with no real backing file) were deleted as housekeeping (see §13 Change Log), leaving 8 real documents. `scripts/seed.py` itself was **not** modified, so re-running it will recreate the original ~53-document corpus, dummy rows included — this table still describes that script's actual output, not the current pruned state.
 
 **Note (2026-07-28):** `users` is now **6** — the five seeded accounts plus one real account created through the invitation flow. Seeded users have **no password** until `uv run python -m scripts.set_demo_passwords` is run, which sets them all to `Test@123`; without it nobody can sign in, because `scripts/seed.py` predates passwords and leaves `password_hash` NULL. Since local and production share one database, that script has already been run against production. Demo accounts are listed in the README.
+
+**Note (2026-07-29) — `seed.py` used to destroy every other organization.** It ran `TRUNCATE ... CASCADE` across eight tables **globally** and then reseeded only Accenture. `organizations` itself was never truncated, so every other organization survived as an empty shell: no categories (upload blocked), no users (nobody able to log in), and via `CASCADE` no invitations, share links, AI jobs or embeddings either. Its own docstring called it "safe to re-run", and it points at the same database production uses — so this was a live data-loss bug, not a theoretical one. Now organization-scoped `DELETE`s in FK-safe order, with a tripwire that snapshots every other organization's row counts before and after *inside the transaction* and raises if they differ, so a regression rolls back instead of committing someone else's loss. Verified against the real database inside a rolled-back transaction (`2b78213`).
+
+**Note (2026-07-29) — current organizations:** Accenture (6 users, 19 active documents, 13 categories) and Infosys (1 user, 2 documents, 5 default categories). A third, "Wipro Test Co", was created while testing the platform-admin flow, never given an admin, and deleted on 2026-07-29 — it held only its 5 seeded categories and no user or document data. Deleting it required removing those categories first, since every tenant FK is `ON DELETE RESTRICT` and there is no delete-organization endpoint.
 
 ### Indexes
 
@@ -803,7 +887,7 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 
 ## 7. Backend Status
 
-**All Phase 3 modules complete, plus the auth and admin tracks.** **39 unique paths, 49 method+path combinations**, verified against real Supabase data (not mocks) — real PDF uploads, byte-for-byte download checks, real permission-denial tests per role.
+**All Phase 3 modules complete, plus the auth, admin, multi-tenant and platform-admin tracks.** **43 unique paths, 54 method+path combinations** (counted from the live OpenAPI spec, 4 of them platform-admin), verified against real Supabase data (not mocks) — real PDF uploads, byte-for-byte download checks, real permission-denial tests per role, and cross-organization denial tests per endpoint.
 
 | Module | Router | Service | Repository | Notes |
 |---|---|---|---|---|
@@ -815,6 +899,7 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 | Taxonomy | ✅ | ✅ | ✅ | Categories + Tags, admin-only mutations |
 | Reviews | ✅ | ✅ | ✅ | Pending queue, mark-reviewed |
 | Dashboard | ✅ | ✅ | ✅ | Summary + activity feed, now with an optional `documentId` filter (added 2026-07-23 for the Details page's Activity tab) |
+| Platform *(super admin)* | ✅ | ✅ | ✅ | `/platform/auth/login`, `/platform/auth/me`, `GET/POST /platform/organizations`, `POST /platform/organizations/{id}/admins`. Guarded by `get_current_platform_admin`, a different dependency from every row above — a tenant JWT is rejected here and a platform JWT is rejected everywhere else. Organization listing returns user/document **counts only**, never titles or content |
 | Text Extraction *(AI track)* | ➖ still no dedicated router — `extractionStatus` rides the existing `GET /documents/{id}` instead | ✅ `TextExtractionService` | ✅ `DocumentExtractedTextRepository` + `AiJobRepository` | Fully wired end-to-end: upload/new-version/restore enqueue automatically, `app/ai_jobs/main.py` now actually **runs as a persistent background process** (not just invoked manually for testing), `scripts/backfill_extraction_jobs.py` caught up every pre-existing document, hard-delete cleans up, `DocumentDetail` exposes `extractionStatus`. Verified live against the real API with an unattended worker already running — no manual trigger. |
 | AI Metadata Generation *(AI track, Phase 2)* | ➖ no router — shadow mode, nothing user-facing reads it | ✅ `MetadataGenerationService` | ✅ `AiDocumentAnalysisRepository` | Built and wired (chained from successful extraction), worker registers the handler conditionally on `GEMINI_API_KEY`. **No live Gemini call has been made in this environment** — no key configured; `scripts/ai_smoke_test.py` is the intended first real-API check once one is set. |
 
@@ -958,6 +1043,17 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 - **2026-07-25** (Testing) — Tests drive the app through `TestClient` at the HTTP boundary (real routing, real JWT auth, real multipart uploads, real error handlers) rather than calling service classes directly. Reasoning: every bug found by hand this session lived in the wiring *between* layers — a storage adapter's stream type, a DI provider ignoring its injected dependency, a frontend/backend state mismatch — not inside a single unit. Unit-testing the services in isolation would have caught none of them.
 - **2026-07-25** (Testing) — Storage in tests is redirected to a per-test `tmp_path` by overriding the FastAPI service providers, not by monkeypatching `get_storage` or setting `STORAGE_PROVIDER`. Reasoning: `get_settings()` is `lru_cache`d and read at import time, so an env-var approach can't be made reliably per-test; overriding the DI providers is the mechanism FastAPI already offers and keeps the real Supabase bucket entirely out of reach of the suite.
 - **2026-07-25** (Storage track) — Extracted-text `.txt` files are deliberately *not* given their own `storage_provider` tracking, unlike the original document content. Reasoning: they're written moments after the original upload by the same worker process (not read on-demand indefinitely the way a document's content is), so the drift window is negligible in practice; the failure mode if it's ever wrong is a harmless orphaned file, not a broken read — not worth a second provider-tracking column for a derived, regenerable artifact.
+- **2026-07-29** (Multi-tenancy) — **Pooled multi-tenancy** (one database, one set of tables, an `organization_id` column) over schema-per-tenant or database-per-tenant. Reasoning: the alternatives multiply migration and connection-pool cost by tenant count to buy isolation this codebase can enforce in one place — the repository layer — and every real-world comparable named in the architecture review uses the pooled model at this scale. The cost is that isolation is now a code property rather than an infrastructure one, which is exactly why Phase 6's isolation suite is the migration's acceptance criteria rather than a nice-to-have.
+- **2026-07-29** (Multi-tenancy) — `organization_id` is **denormalized directly onto all 11 tenant-scoped tables** rather than derived through a join chain. Reasoning: the join chain is precisely what failed. The pre-migration similarity search reached documents through `document_vector_embeddings → document_versions → documents`, and having no organization column of its own is why a pgvector nearest-neighbour query happily ranked another tenant's documents as "similar". A column on the row being filtered removes the possibility of a query forgetting to traverse far enough.
+- **2026-07-29** (Multi-tenancy) — **No request ever carries an organization id.** Every query scopes to `current_user.organization_id`, re-read from the database per request. The JWT's `org_id` claim exists only so the frontend can render the organization name without a round-trip and is never an authorization input. Reasoning: an organization id accepted from the client is an IDOR waiting to happen, and this preserves the existing "role changes take effect immediately" property for free — same mechanism, same re-fetch.
+- **2026-07-29** (Platform admin) — Super admins live in a **separate `platform_admins` table**, not as a `SUPER_ADMIN` role on `users`. Reasoning: a role-based super admin belongs to no organization, which forces `users.organization_id` to stay nullable — and that column being `NOT NULL` is the guarantee the entire isolation model rests on. Keeping them in a separate table with a separate JWT type, cookie, BFF proxy and frontend area means the two systems can't be confused for one another by accident, at the cost of some deliberate duplication in the auth layer.
+- **2026-07-29** (Multi-tenancy) — The `NOT NULL` enforcement was split into **its own migration, one step after the backfill** (`7bbf96ca24d8` adds nullable columns and backfills; `8ebd25762f70` enforces). Reasoning: it leaves a window where the columns exist and are populated but nothing is required yet, so application code can be updated and deployed without any moment where writes fail. The lesson learned the hard way is that this only works if the code actually ships in that window — applying `8ebd25762f70` while the code sat unmerged is what broke production writes on 2026-07-29 (see §10).
+
+---
+
+## 10. Known Issues & Risks
+
+*(This heading was missing entirely until 2026-07-29 — the Resolved/Open lists below existed but sat orphaned under §9, while the rest of the document referenced "§10" throughout. Restored, no content changed.)*
 
 ### Resolved (kept for history — do not delete)
 
@@ -1003,7 +1099,8 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 
 - ~~**No `GEMINI_API_KEY` was configured**~~ — resolved: a real key was provided and added to `.env`, live end-to-end verified (see Change Log). `gemini-2.0-flash` returned `429 RESOURCE_EXHAUSTED` (`limit: 0` on this project's free tier for that specific model) — switched the default model to `gemini-2.5-flash`, which worked at the time. **Superseded 2026-07-25**: the default is now `gemini-flash-latest` (an alias Google repoints as models are retired), currently resolving to `gemini-3.6-flash`. Confirmed live that `gemini-2.5-flash` itself now returns `404 — "no longer available to new users"`, i.e. the pinned model this entry recommended has since been retired while the alias kept working straight through it. That's the deliberate reason for preferring the alias here: a pinned model dying silently is a worse failure mode for this app than an unannounced model upgrade, since nothing monitors it and the output is Pydantic-validated and only ever shown as an accept-or-ignore suggestion. **Minor open item** (originally attributed to `gemini-2.5-flash`, not re-checked against the current model): structured-JSON output occasionally corrupts an em-dash (`—`) inside a generated `title` into a stray `\", \"` sequence — reproduced directly against the raw API, so it's a model-side structured-decoding quirk for that specific character, not a bug in our JSON parsing (the JSON itself is valid; Pydantic validates it fine) and not something our code can reliably prevent. Doesn't crash anything — worst case is a slightly garbled suggested title, which is display-only until a user explicitly clicks Accept. Only seen so far in one PPTX test document; not seen in the real live demo document (a plain-text HR policy) or other test documents.
 - **The AI worker has no supervisor and isn't started automatically.** `app/ai_jobs/main.py` needs to be run as its own long-lived process (`uv run python -m app.ai_jobs.main`) alongside the API and frontend dev servers; nothing restarts it if it crashes or the machine reboots, and `uvicorn`/`next dev` starting up doesn't imply it's running. If it's down, extraction jobs simply queue up unprocessed — no error surfaces anywhere in the UI (by design, per the graceful-degradation pattern), which makes this specific failure mode easy to miss. Confirmed as the root cause of a real "the badge never clears" report during this session. Acceptable for local dev; would need a real process manager (systemd/supervisor/a container sidecar) before any actual deployment.
-- ~~**No automated test suite.**~~ — **backend API flows are now covered (178 tests as of 2026-07-28); the frontend still has none.** `tests/api/` covers auth, upload/search/edit/permissions, versioning (upload/list/download/restore), reviews, trash/hard-delete, and one full-lifecycle integration test, against the real Postgres schema (see §9 for the transaction-rollback strategy). Still open: the frontend has no component/E2E tests at all — verification there remains ad hoc Playwright scripts in the session scratchpad, not checked into the repo.
+- **The ORM models can drift from the migrated schema again, and `--autogenerate` is the blast radius.** Fixed once on 2026-07-29 (`9b7dd89`) after the models still described the pre-multi-tenant schema: `organization_id` declared nullable on all 11 tables, and global uniqueness still claimed on `categories.slug`/`tags.normalized_name`. Two failure modes, and the second is the dangerous one. (1) Omitting `organization_id` in a constructor stayed legal to Python and mypy, so the error surfaced only at runtime inside a worker that swallows failures by design — that is precisely how the AI-generation bug shipped and went unnoticed. (2) Because `alembic/env.py` compares against `Base.metadata`, the next `alembic revision --autogenerate` would have emitted a migration **dropping `NOT NULL` across all 11 tables, restoring global uniqueness, and dropping three indexes created with raw `op.execute()` that the models never declared** — the pgvector HNSW index behind similarity search, the GIN index behind full-text search, and the partial index behind the Explorer listing. Those three are now declared in `__table_args__` specifically so autogenerate can see them. **The standing rule: after any hand-written migration, run `alembic revision --autogenerate` and confirm it produces an empty `upgrade()` before trusting it again.** Nothing enforces this automatically.
+- ~~**No automated test suite.**~~ — **backend API flows are now covered (211 tests as of 2026-07-29); the frontend still has none.** `tests/api/` covers auth, upload/search/edit/permissions, versioning (upload/list/download/restore), reviews, trash/hard-delete, and one full-lifecycle integration test, against the real Postgres schema (see §9 for the transaction-rollback strategy). Still open: the frontend has no component/E2E tests at all — verification there remains ad hoc Playwright scripts in the session scratchpad, not checked into the repo.
 - **Dashboard's "Recently Accessed" widget shows `updatedAt`, not a true "last accessed" timestamp.** `GET /dashboard/summary` returns `DocumentSummary` objects, which don't include `lastAccessedAt` (only `DocumentDetail` does, via the document-detail endpoint). Not worth a backend schema change for one dashboard widget's label right now — revisit if it's noticeably confusing in practice.
 - **Upload progress reflects the browser→Next.js leg only, not Next.js→FastAPI.** The BFF proxy buffers the full response before returning it, so true end-to-end progress isn't observable from the client — acceptable on localhost where that second leg is fast; worth revisiting if the backend is ever deployed somewhere with meaningfully higher latency between the two.
 - **Search doesn't cover document body text.** `search_vector` indexes title, description, tags, category name, and current filename — not the actual PDF/DOCX content (FR-22, deferred).
@@ -1030,18 +1127,22 @@ Run via `uv run python -m scripts.seed` (idempotent — truncates first). Curren
 
 **Production latency is substantially better** — the Railway service was moved to Singapore on 2026-07-29, and the dashboard went from 7.1s to **1.85s** (3.8×). Full before/after table in §10.
 
+**Multi-tenancy is done and deployed** — all six phases plus the platform-admin area are live, merged to `develop` on 2026-07-29, and verified in production against two real organizations (isolation confirmed both directions: zero document overlap, and a cross-organization fetch returns 404). Three bugs found by actually using it are fixed, and the model/schema alignment that makes that last bug class statically detectable is in place. See §3.
+
 ### Deferred by decision (2026-07-29)
 
 *Reviewed and consciously postponed — these are choices, not oversights. Recorded here so the reasoning survives and they don't get silently rediscovered as "bugs" later.*
 
-- **Separate the local and production databases.** The single highest-risk item on this list: one Supabase Postgres serves both, and on 2026-07-28 that turned a routine local migration into a production outage (see the warning at the top of this document). Deferred anyway — the workaround is a discipline rather than a code change (**merge and deploy before migrating locally**), and it has held since. Revisit before anyone else joins the project, or before any migration that drops or rewrites data, because the workaround depends entirely on one person remembering it.
+- **Separate the local and production databases.** The single highest-risk item on this list — and it has now bitten **twice**, so "deferred" is getting harder to justify. 2026-07-28: a local migration crash-looped Railway. 2026-07-29: the multi-tenant migrations were applied locally while the code sat unmerged, silently breaking every write in production for hours (details in the warning at the top). The workaround is a discipline rather than a code change (**merge and deploy before migrating locally**), and both incidents are cases of that discipline not being followed. Still deferred, but this should be the next infrastructure item picked up — and certainly before anyone else can push.
 - **Collapse `/dashboard/summary`'s 21 SQL statements.** Now the dominant remaining latency cost, but the app is fast enough to use after the region move. This is an optimisation, not a problem. See §10 for the measured numbers.
-- **A CI workflow.** Pushes to `develop` still deploy straight to production with the 178 tests running only if someone remembers. Accepted for a single-developer project where the tests *are* being run; the cost/benefit changes the moment a second person can push.
+- **A CI workflow.** Pushes to `develop` still deploy straight to production with the 211 tests running only if someone remembers. Accepted for a single-developer project where the tests *are* being run; the cost/benefit changes the moment a second person can push. Worth noting the multi-tenant merge was verified by hand across seven pre-flight checks (conflict-free merge, no new env vars, no pending migrations, frontend typecheck/lint/build, full suite on the merged result, local smoke test, then production verification) — all of which a CI pipeline would do unprompted.
 
 ### Still genuinely open
 
 1. **Frontend tests** — still nothing at all. Verification today is `tsc` + `eslint` + a production build + driving the running app by hand. Also outstanding: the scripted demo walkthrough exercising each of the six pains from the original brief in order (§19.7).
-2. **Delete or ignore the `main` branch.** Vercel's production branch is now `develop`; `main` is ~16 commits behind and nothing depends on it.
+2. **Delete or ignore the `main` branch.** Vercel's production branch is now `develop`; `main` is now ~36 commits behind and nothing depends on it.
+3. **The multi-tenant leftovers in §4** — validate `owner_id` on document update, isolation tests for versions/tags/trash, and two maintenance scripts broken on post-multi-tenancy signatures. All small; none blocking.
+4. **No way to delete an organization.** There is no endpoint, and every tenant FK is `ON DELETE RESTRICT`, so removing one means clearing its rows in child-first order by hand (done once, for "Wipro Test Co"). Fine while organizations are created rarely and deliberately; worth building if that changes. Related: the create-organization → create-first-admin flow is two separate calls, so abandoning it halfway leaves an organization nobody can log into — which is exactly how that test organization came to exist.
 
 Ask before starting, per standing practice.
 
@@ -1073,6 +1174,13 @@ Ask before starting, per standing practice.
 
 ### 2026-07-29
 
+- **Deleted the "Wipro Test Co" organization and brought this document up to date with the multi-tenant work.** The organization was created while testing the platform-admin flow, never given an admin, and held only its 5 seeded categories — no users, no documents, nothing else. Removal meant deleting those categories first, since every tenant FK is `ON DELETE RESTRICT` and no delete-organization endpoint exists. Verified against production afterwards: Accenture and Infosys unchanged, other-organization row counts identical before and after.
+- **Merged the multi-tenant + platform-admin work to `develop` and verified it live in production.** Seven pre-flight checks before anything was pushed: conflict-free merge (19 commits, no divergence), no new environment variables (`config.py` and `.env.example` byte-identical between branches), **zero pending migrations** so the deploy's `alembic upgrade head` is a no-op — the specific thing that crash-looped Railway a day earlier — frontend `tsc`/`eslint`/production build all clean, 211 tests on the merged result, and a local smoke test against the real database. After deploy: health stayed 200 throughout with no crash loop, the previously-broken write path works (upload succeeded, correctly org-scoped, then purged), reads all 200, both organizations' logins work, platform-admin login works, and isolation holds both directions (19 vs 2 documents, zero overlap, cross-organization fetch 404s).
+- **Found that production had been silently broken for writes, and why.** The four organization migrations through `a3b7efaeff2c` had been applied to the shared database while the code sat unmerged on a feature branch. Because the running container never restarted, `/health` and login kept returning 200 — but `organization_id` was `NOT NULL` with no default while the deployed models didn't know the column existed, so **every write to all 11 tenant-scoped tables was failing**. Found by audit, not by an alert. This is the second time the shared local/production database has caused an incident; §10's entry and the top-of-file warning now both record it, with the added lesson that a green health check and a working login prove nothing about writes when schema and code disagree.
+- **Fixed `seed.py`, which would have destroyed every organization except Accenture.** It ran `TRUNCATE ... CASCADE` globally and reseeded only the demo organization, leaving every other one an empty shell — no categories (upload blocked), no users (nobody able to log in). Its docstring called it "safe to re-run" and it points at the production database. Now organization-scoped `DELETE`s in FK-safe order plus an in-transaction tripwire that rolls the whole run back if another organization's row counts change. Verified against the real database inside a rolled-back transaction.
+- **Brought the ORM models back in line with the migrated schema — the fix that makes a whole bug class visible.** All 11 models still declared `organization_id` nullable and still claimed global uniqueness on `categories.slug`/`tags.normalized_name`. That made omitting `organization_id` legal to mypy (43 of 46 errors were this one cause) so failures only appeared at runtime inside a worker that swallows them — exactly how the AI bug shipped. Worse, `alembic revision --autogenerate` had become actively destructive: the next run would have dropped `NOT NULL` on all 11 tables, restored global uniqueness, and dropped the pgvector HNSW, full-text GIN and Explorer partial indexes, none of which the models declared. No migration and no data change were needed — the database already enforced all of it. Proved correct by generating a throwaway autogenerate and confirming an empty `upgrade()`.
+- **Shipped multi-tenancy end to end (6 phases) plus a platform-admin area (5 phases).** Pooled model, `organization_id` denormalized onto all 11 tenant-scoped tables, isolation enforced in the backend on every query and never taken from the client, per-organization category/tag vocabularies, organization name surfaced in the UI, and a 16-test cross-tenant isolation suite as the acceptance criteria. Platform admins live in their own table with their own JWT/cookie/proxy/frontend area, deliberately not as a role on `users` — that would have forced `organization_id` to stay nullable there, which is the guarantee the whole model rests on. Full detail in §3.
+- **Three bugs found by actually using the multi-tenant system, all sharing one shape.** Accenture's data came from the Phase 2 backfill, giving it history that made features look functional while the code paths that *create* that history were missing or broken. A new organization exposed each: no default categories at all (upload impossible), then default categories with no review period (marking reviewed silently didn't move the due date), then `organization_id` missing on AI-generated rows. The third was reported as "AI doesn't work for Infosys" but turned out to affect every organization — Accenture's newest document failed identically, and only its pre-migration rows still had data to disguise it. Every AI job had been failing and retrying to permanent failure since the migration, silently, because the worker degrades gracefully by design.
 - **Moved the Railway service to Singapore — production latency improved 2–3.8×, and the original diagnosis was confirmed rather than merely assumed.** Re-measured the same four endpoints (best of 3, discounting cold starts): `/health` 0.47s → **0.23s**, `/auth/users` 1.30s → **0.49s**, `/documents` 3.2s → **0.92s**, `/dashboard/summary` 7.1s → **1.85s**. The 2026-07-27 analysis predicted "roughly 4×" from the region change alone and the dashboard came in at 3.8×; the gain also still scales with query count, exactly as the linear-scaling finding said it would. Full table in §10.
 - **Reviewed the three open infrastructure items and deferred all three by explicit decision** — separating the local/production databases, collapsing `/dashboard/summary`'s 21 queries, and adding a CI gate. Recorded in §11 under a new "Deferred by decision" heading rather than left in a priority list, so the reasoning survives and they aren't silently rediscovered as bugs later. The database split keeps its full risk description in §10, including the note that its workaround is a discipline one person has to remember, not a guarantee.
 
