@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { TOKEN_COOKIE } from "@/lib/constants";
+import { PLATFORM_TOKEN_COOKIE, TOKEN_COOKIE } from "@/lib/constants";
 
 // Next.js 16 renamed `middleware.ts` -> `proxy.ts` (exported fn `proxy`, not
 // `middleware`). This only checks token *presence*, not validity — the JWT
@@ -14,8 +14,31 @@ const PUBLIC_PATHS = ["/login", "/forgot-password"];
 // added to PUBLIC_PATHS precisely so that difference is explicit.
 const SHARED_PATHS = ["/share/", "/invite/", "/reset-password/"];
 
+// /platform is a completely separate session (own cookie, own login page),
+// so it gets its own guard rather than being folded into the checks below —
+// a visitor with a normal user session but no platform session must still
+// be bounced to /platform/login, and vice versa.
+function platformGuard(request: NextRequest): NextResponse {
+  const { pathname } = request.nextUrl;
+  const isLoginPath = pathname === "/platform/login";
+  const token = request.cookies.get(PLATFORM_TOKEN_COOKIE)?.value;
+
+  if (!token && !isLoginPath) {
+    return NextResponse.redirect(new URL("/platform/login", request.url));
+  }
+  if (token && isLoginPath) {
+    return NextResponse.redirect(new URL("/platform", request.url));
+  }
+  return NextResponse.next();
+}
+
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  if (pathname.startsWith("/platform")) {
+    return platformGuard(request);
+  }
+
   const isPublicPath = PUBLIC_PATHS.some((path) => pathname.startsWith(path));
   // Note the trailing slash in SHARED_PATHS: "/share/<token>" opens, but a
   // bare "/share" (or anything like "/shared-secrets") does not, so this
