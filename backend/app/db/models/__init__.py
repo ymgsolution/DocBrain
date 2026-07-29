@@ -9,6 +9,7 @@ from app.db.models.document_version import DocumentVersion
 from app.db.models.invitation import Invitation
 from app.db.models.organization import Organization
 from app.db.models.password_reset import PasswordResetToken
+from app.db.models.platform_admin import PlatformAdmin
 from app.db.models.share_link import ShareLink
 from app.db.models.tag import DocumentTag, Tag
 from app.db.models.user import User
@@ -26,6 +27,7 @@ __all__ = [
     "Invitation",
     "Organization",
     "PasswordResetToken",
+    "PlatformAdmin",
     "ShareLink",
     "DocumentTag",
     "Tag",
