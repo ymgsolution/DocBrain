@@ -33,6 +33,9 @@ export function UserMenu() {
           <DropdownMenuLabel>
             <p className="truncate text-sm font-medium">{user.displayName}</p>
             <p className="text-muted-foreground truncate text-xs font-normal">{user.email}</p>
+            {user.organization && (
+              <p className="text-muted-foreground truncate text-xs font-normal">{user.organization.name}</p>
+            )}
           </DropdownMenuLabel>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
