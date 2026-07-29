@@ -1,8 +1,8 @@
 # DocBrain — Bug Investigation & Regression Validation: Organization Migration
 
-**Status:** Investigation complete. No code changed yet — this document ends with a fix plan, per instructions.
+**Status:** Investigation complete. **Primary fix (Part 12) implemented in commit `2c70cea`** — new organizations now get 5 default categories at creation time, and the existing "Infosys" org was backfilled the same way. Secondary fix (upload dialog empty-state messaging) not yet implemented.
 **Reported symptom:** An Infosys user opens Upload Document → Category dropdown is completely empty. An Accenture user does not have this problem.
-**Verified against:** the live local database, the current code on `feature/multi-tenant-organizations` (through commit `b4d07a8`), and the full 206-test backend suite.
+**Verified against:** the live local database, the current code on `feature/multi-tenant-organizations` (through commit `b4d07a8` for the investigation, `2c70cea` for the fix), and the full 207-test backend suite.
 
 ---
 
