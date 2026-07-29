@@ -2,11 +2,19 @@ import uuid
 
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.passwords import MIN_PASSWORD_LENGTH, hash_password
-from app.db.models import Organization, User
+from app.db.models import Category, Organization, User
 from app.db.models.enums import UserRole
 from app.modules.auth.repository import AuthRepository
 from app.modules.platform.organizations_repository import OrganizationsRepository
 from app.utils.slugify import slugify
+
+# A brand new organization needs at least one category to be upload-ready —
+# category_id is required on every document, so zero categories silently
+# blocks the very first upload (docs/ORGANIZATION-MIGRATION-BUG-INVESTIGATION.md).
+# A generic starter set, not a copy of any specific org's taxonomy — that
+# org's own admin can rename, delete, or add to these immediately, exactly
+# as freely as Accenture's admin manages its 13 categories today.
+DEFAULT_CATEGORY_NAMES = ["General", "Finance", "HR", "Legal", "Operations"]
 
 
 class OrganizationsService:
@@ -29,6 +37,17 @@ class OrganizationsService:
     def create_organization(self, *, name: str) -> Organization:
         organization = Organization(name=name.strip(), slug=self._unique_slug(name))
         self.repository.add(organization)
+        self.repository.db.flush()  # allocate organization.id for the categories below
+
+        # Slugs only need to be unique per organization, and this is the
+        # first row for this one — no collision to check for, unlike
+        # TaxonomyService._unique_slug which handles a caller picking a name
+        # that already exists in an established org's taxonomy.
+        for category_name in DEFAULT_CATEGORY_NAMES:
+            self.repository.db.add(
+                Category(organization_id=organization.id, name=category_name, slug=slugify(category_name))
+            )
+
         self.repository.db.commit()
         self.repository.db.refresh(organization)
         return organization

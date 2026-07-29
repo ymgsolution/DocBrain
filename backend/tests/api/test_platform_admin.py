@@ -185,6 +185,62 @@ def test_create_organization_and_first_admin_end_to_end(client: TestClient, plat
     assert documents.status_code == 200
     assert documents.json()["total"] == 0, "a brand new organization must start with zero documents"
 
+    # The actual reported bug: a new org's category dropdown must not be
+    # empty, or the very first upload is silently blocked
+    # (docs/ORGANIZATION-MIGRATION-BUG-INVESTIGATION.md).
+    categories = client.get("/api/v1/categories", headers=new_admin_headers)
+    assert categories.status_code == 200
+    category_names = [c["name"] for c in categories.json()]
+    assert category_names, "a brand new organization must not start with zero categories"
+    assert "General" in category_names
+
+    # Prove it end-to-end, not just that a category row exists: actually
+    # upload a document using one of the seeded categories.
+    first_category_id = categories.json()[0]["id"]
+    upload = client.post(
+        "/api/v1/documents",
+        headers=new_admin_headers,
+        data={"title": "Welcome Packet", "categoryId": first_category_id, "tags": ""},
+        files={"file": ("notes.txt", io.BytesIO(b"hello"), "text/plain")},
+    )
+    assert upload.status_code == 201, upload.text
+
+
+def test_new_organization_starts_with_default_categories_only_visible_to_it(
+    client: TestClient, auth, platform_admin: PlatformAdmin, employee: User
+) -> None:
+    headers = _platform_auth(client, platform_admin)
+    create_org = client.post(ORGANIZATIONS, headers=headers, json={"name": f"Org {uuid.uuid4().hex[:8]}"})
+    org_id = create_org.json()["id"]
+
+    create_admin = client.post(
+        f"{ORGANIZATIONS}/{org_id}/admins",
+        headers=headers,
+        json={
+            "email": f"admin-{uuid.uuid4().hex[:8]}@test.docbrain",
+            "displayName": "New Org Admin",
+            "password": "SomePassword123",
+        },
+    )
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"email": create_admin.json()["email"], "password": "SomePassword123"},
+    )
+    new_org_headers = {"Authorization": f"Bearer {login.json()['token']}"}
+
+    response = client.get("/api/v1/categories", headers=new_org_headers)
+    assert response.status_code == 200
+    new_org_categories = response.json()
+    assert sorted(c["name"] for c in new_org_categories) == ["Finance", "General", "HR", "Legal", "Operations"]
+    new_org_category_ids = {c["id"] for c in new_org_categories}
+
+    # Names can legitimately repeat across organizations (composite
+    # uniqueness is per-org, e.g. both orgs may have a "Finance" category) —
+    # what must never repeat is the *row*. Assert by id, not name.
+    accenture_categories = client.get("/api/v1/categories", headers=auth(employee))
+    accenture_category_ids = {c["id"] for c in accenture_categories.json()}
+    assert new_org_category_ids.isdisjoint(accenture_category_ids)
+
 
 def test_cannot_create_second_first_admin_with_duplicate_email(
     client: TestClient, platform_admin: PlatformAdmin, employee: User
