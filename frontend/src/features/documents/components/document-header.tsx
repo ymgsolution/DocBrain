@@ -63,7 +63,7 @@ export function DocumentHeader({
                 Analyzing document…
               </Badge>
             ) : (
-              isAiSuggestionPending(document) && (
+              isAiSuggestionPending(document, currentUser.organization?.aiSuggestionsEnabled ?? false) && (
                 <Badge variant="outline" className="gap-1 font-normal">
                   <Loader2 className="size-3 animate-spin" />
                   Getting AI suggestions…

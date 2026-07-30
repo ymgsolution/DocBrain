@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { documentsApi } from "./api";
 import { dashboardApi } from "@/features/dashboard/api";
+import { useCurrentUser } from "@/features/auth/hooks";
 import { isExtractionPending, isAiSuggestionPending } from "@/lib/format";
 import type { DocumentCreatePayload, DocumentListFilters, DocumentUpdatePayload } from "./types";
 
@@ -42,6 +43,11 @@ export function useCreateDocument() {
 }
 
 export function useDocument(id: string) {
+  // Read here and closed over below: refetchInterval is a plain callback, not
+  // a component, so it can't call a hook itself.
+  const { data: user } = useCurrentUser();
+  const aiSuggestionsEnabled = user?.organization?.aiSuggestionsEnabled ?? false;
+
   return useQuery({
     queryKey: documentsKeys.detail(id),
     queryFn: () => documentsApi.get(id),
@@ -49,9 +55,16 @@ export function useDocument(id: string) {
     // "Analyzing…" badge clears on its own; stops the instant it lands on a
     // terminal status, or after isExtractionPending's own timeout (worker
     // down / job stuck) so this never polls forever.
+    //
+    // Defaulting to false while the user query is still loading is
+    // deliberate: at worst the first poll is skipped and the next render
+    // starts it, which is far better than polling for two minutes against an
+    // organization that will never produce a suggestion.
     refetchInterval: (query) => {
       const data = query.state.data;
-      return data && (isExtractionPending(data) || isAiSuggestionPending(data)) ? 2000 : false;
+      return data && (isExtractionPending(data) || isAiSuggestionPending(data, aiSuggestionsEnabled))
+        ? 2000
+        : false;
     },
   });
 }

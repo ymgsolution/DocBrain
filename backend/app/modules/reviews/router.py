@@ -73,4 +73,4 @@ def mark_reviewed(
     current_user: User = Depends(require_role(UserRole.REVIEWER, UserRole.ADMIN)),
 ) -> DocumentDetail:
     document = service.mark_reviewed(document_id, note=payload.note, current_user=current_user)
-    return to_document_detail(document)
+    return to_document_detail(document, ai_suggestions_enabled=current_user.organization.ai_suggestions_enabled)
