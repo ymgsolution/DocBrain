@@ -519,7 +519,7 @@ Full reasoning in [docs/MULTI-TENANT-ARCHITECTURE-REVIEW.md](docs/MULTI-TENANT-A
   - Completed: 2026-07-29 (Phase 4, migration `8ebd25762f70`)
 - **Organization name in the UI** — sidebar header and user-menu dropdown.
   - Completed: 2026-07-29 (Phase 5)
-- **Cross-tenant isolation test suite** — 16 tests in `tests/api/test_multi_tenant_isolation.py`, the actual acceptance criteria for the migration. Every other test file implicitly runs inside one organization and would never notice a missing filter, because there was no second organization's data to leak. Covers list/get/update/delete documents, similarity search (two documents with *identical* embedding vectors — the strongest possible cross-tenant pull), categories, pending reviews, dashboard totals, share links, user administration, the colleague directory, and invitation accept.
+- **Cross-tenant isolation test suite** — 27 tests in `tests/api/test_multi_tenant_isolation.py` (16 at migration time, extended to 27 on 2026-07-30 to cover versions, tags and trash), the actual acceptance criteria for the migration. Every other test file implicitly runs inside one organization and would never notice a missing filter, because there was no second organization's data to leak. Covers list/get/update/delete documents, similarity search (two documents with *identical* embedding vectors — the strongest possible cross-tenant pull), categories, pending reviews, dashboard totals, share links, user administration, the colleague directory, and invitation accept.
   - Completed: 2026-07-29 (Phase 6)
   - Notes: verified in production against two real organizations — Accenture sees 19 documents, Infosys 2, zero overlap, and fetching one org's document with the other's token returns 404.
 
