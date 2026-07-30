@@ -36,7 +36,7 @@ class OrganizationsService:
         self.repository = repository
         self.users = users
 
-    def list_organizations(self) -> list[tuple[Organization, int, int, int]]:
+    def list_organizations(self) -> list[tuple[Organization, int, int, int, int]]:
         return self.repository.list_with_stats()
 
     def _unique_slug(self, base: str) -> str:

@@ -137,9 +137,13 @@ def test_organization_list_shows_counts_but_never_document_content(
     accenture = next(o for o in response.json() if o["id"] == str(employee.organization_id))
     assert accenture["documentCount"] >= 1
     assert accenture["userCount"] >= 1
-    # The only per-org fields are id/name/slug/createdAt + the three counts —
-    # nothing else, by construction of OrganizationStats, but assert it here
-    # too so a future field addition has to consciously pass this test.
+    # The only per-org fields are id/name/slug/createdAt, the three counts,
+    # the settings block and the storage total — nothing else, by
+    # construction of OrganizationStats, but assert it here too so a future
+    # field addition has to consciously pass this test. `settings` and
+    # `storageUsedBytes` were added by Organization Settings Phase 1 and are
+    # listed here deliberately: both are aggregates or configuration, neither
+    # carries document titles or content.
     assert set(accenture.keys()) == {
         "id",
         "name",
@@ -148,7 +152,18 @@ def test_organization_list_shows_counts_but_never_document_content(
         "userCount",
         "activeUserCount",
         "documentCount",
+        "settings",
+        "storageUsedBytes",
     }
+    assert set(accenture["settings"].keys()) == {
+        "aiSuggestionsEnabled",
+        "duplicateDetectionEnabled",
+        "storageLimitMb",
+    }
+    # The upload above was a real file, so the organization's storage total
+    # must have moved off zero — proves the sum is wired to real bytes rather
+    # than reporting a constant.
+    assert accenture["storageUsedBytes"] > 0
 
 
 # --- the full bootstrap flow -----------------------------------------------
