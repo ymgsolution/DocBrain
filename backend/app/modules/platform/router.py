@@ -16,6 +16,7 @@ from app.schemas.platform import (
     FirstAdminCreated,
     OrganizationCreate,
     OrganizationCreated,
+    OrganizationSettings,
     OrganizationStats,
     PlatformAdminSummary,
     PlatformLoginRequest,
@@ -64,8 +65,14 @@ def list_organizations(
             user_count=user_count,
             active_user_count=active_user_count,
             document_count=document_count,
+            settings=OrganizationSettings(
+                ai_suggestions_enabled=org.ai_suggestions_enabled,
+                duplicate_detection_enabled=org.duplicate_detection_enabled,
+                storage_limit_mb=org.storage_limit_mb,
+            ),
+            storage_used_bytes=storage_used_bytes,
         )
-        for org, user_count, active_user_count, document_count in service.list_organizations()
+        for org, user_count, active_user_count, document_count, storage_used_bytes in service.list_organizations()
     ]
 
 
