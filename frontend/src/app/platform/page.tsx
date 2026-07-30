@@ -11,6 +11,7 @@ import { ErrorState } from "@/components/shared/error-state";
 import { PageHeader } from "@/components/shared/page-header";
 import { CreateFirstAdminDialog } from "@/features/platform/components/create-first-admin-dialog";
 import { CreateOrganizationDialog } from "@/features/platform/components/create-organization-dialog";
+import { IncompleteSetupBanner } from "@/features/platform/components/incomplete-setup-banner";
 import { useCurrentPlatformAdmin, useOrganizations, usePlatformLogout } from "@/features/platform/hooks";
 import { formatRelativeTime } from "@/lib/format";
 import type { OrganizationStats } from "@/features/platform/types";
@@ -56,6 +57,8 @@ export default function PlatformDashboardPage() {
 
       {isError && <ErrorState message="Couldn't load organizations." onRetry={() => refetch()} />}
 
+      {organizations && <IncompleteSetupBanner organizations={organizations} />}
+
       {organizations && organizations.length === 0 && (
         <EmptyState
           icon={Building2}
@@ -83,30 +86,45 @@ export default function PlatformDashboardPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {organizations.map((org) => (
-                <TableRow key={org.id}>
-                  <TableCell className="font-medium">
-                    {org.name}
-                    <span className="text-muted-foreground ml-2 text-xs">{org.slug}</span>
-                  </TableCell>
-                  <TableCell>
-                    {org.userCount}
-                    {org.userCount > 0 && (
-                      <Badge variant="secondary" className="ml-2">
-                        {org.activeUserCount} active
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>{org.documentCount}</TableCell>
-                  <TableCell className="text-muted-foreground">{formatRelativeTime(org.createdAt)}</TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setAdminTarget(org)}>
-                      <UserPlus className="size-4" />
-                      Create admin
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
+              {organizations.map((org) => {
+                // No users at all means nobody can sign in and nobody can be
+                // invited either, since invitations come from an admin — the
+                // organization is unreachable until one exists.
+                const needsAdmin = org.userCount === 0;
+                return (
+                  <TableRow key={org.id}>
+                    <TableCell className="font-medium">
+                      {org.name}
+                      <span className="text-muted-foreground ml-2 text-xs">{org.slug}</span>
+                    </TableCell>
+                    <TableCell>
+                      {needsAdmin ? (
+                        <Badge variant="destructive">No admin</Badge>
+                      ) : (
+                        <>
+                          {org.userCount}
+                          <Badge variant="secondary" className="ml-2">
+                            {org.activeUserCount} active
+                          </Badge>
+                        </>
+                      )}
+                    </TableCell>
+                    <TableCell>{org.documentCount}</TableCell>
+                    <TableCell className="text-muted-foreground">{formatRelativeTime(org.createdAt)}</TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant={needsAdmin ? "default" : "outline"}
+                        size="sm"
+                        className="gap-1.5"
+                        onClick={() => setAdminTarget(org)}
+                      >
+                        <UserPlus className="size-4" />
+                        {needsAdmin ? "Create admin" : "Add admin"}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>
