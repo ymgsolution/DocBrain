@@ -1,7 +1,6 @@
-"""Organization Settings — Phases 1 and 2 (the data exists, is readable, and
-a platform admin can change it). Nothing is *enforced* yet: the AI toggles
-start gating work in Phase 3 and the storage limit in Phase 4, so these tests
-deliberately assert on stored values and responses, not on behaviour changing.
+"""Organization Settings — Phases 1 to 3. The data exists, a platform admin
+can change it, and the two AI toggles now actually gate work. The storage
+limit is still inert; that lands in Phase 4.
 
 Several things are worth proving here rather than assuming.
 
@@ -16,6 +15,12 @@ bytes, including superseded versions and documents sitting in Trash. Those
 files really are still on disk — soft delete only flips Document.status, and
 only a permanent delete removes them — so a number that quietly excluded them
 would disagree with the disk.
+
+Third, that switching an AI toggle off stops the work being *created*, not
+merely hidden. The gating tests below assert on `ai_jobs` rows rather than on
+the API response, because "no card rendered" would also pass if the job ran,
+cost money and was then quietly discarded — which is the failure this design
+exists to avoid.
 """
 
 import io
@@ -23,17 +28,19 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.core.passwords import hash_password
-from app.db.models import Category, PlatformAdmin, User
+from app.db.models import AiDocumentAnalysis, AiJob, Category, Document, Organization, PlatformAdmin, User
+from app.db.models.enums import AiAnalysisStatus, AiJobType
 from app.db.models.organization import (
     DEFAULT_AI_SUGGESTIONS_ENABLED,
     DEFAULT_DUPLICATE_DETECTION_ENABLED,
     DEFAULT_STORAGE_LIMIT_MB,
 )
 from app.modules.documents.repository import DocumentRepository
+from app.text_extraction.service import TextExtractionService
 
 ORGANIZATIONS = "/api/v1/platform/organizations"
 PLATFORM_PASSWORD = "PlatformPass123"
@@ -298,6 +305,166 @@ def test_settings_patch_404s_for_an_unknown_organization(
         f"{ORGANIZATIONS}/{uuid.uuid4()}/settings", headers=headers, json={"aiSuggestionsEnabled": False}
     )
     assert response.status_code == 404, response.text
+
+
+def _run_extraction(db_session: Session, storage, document_id: uuid.UUID) -> None:
+    """Run the real EXTRACT handler for a document's current version — the one
+    place GENERATE_METADATA and GENERATE_EMBEDDING are ever enqueued."""
+    document = db_session.get(Document, document_id)
+    assert document is not None and document.current_version_id is not None
+    job = db_session.scalar(
+        select(AiJob).where(
+            AiJob.document_version_id == document.current_version_id,
+            AiJob.job_type == AiJobType.EXTRACT,
+        )
+    )
+    assert job is not None, "upload should have enqueued an EXTRACT job"
+    TextExtractionService(storage).process_job(db_session, job)
+
+
+def _followup_job_types(db_session: Session, document_id: uuid.UUID) -> set[AiJobType]:
+    document = db_session.get(Document, document_id)
+    assert document is not None
+    rows = db_session.scalars(
+        select(AiJob.job_type).where(
+            AiJob.document_version_id == document.current_version_id,
+            AiJob.job_type != AiJobType.EXTRACT,
+        )
+    ).all()
+    return set(rows)
+
+
+def _upload(client: TestClient, auth, user: User, category: Category, title: str) -> uuid.UUID:
+    response = client.post(
+        "/api/v1/documents",
+        headers=auth(user),
+        data={"title": title, "categoryId": str(category.id)},
+        files={"file": ("doc.txt", io.BytesIO(b"Enough real text for extraction to succeed."), "text/plain")},
+    )
+    assert response.status_code == 201, response.text
+    return uuid.UUID(response.json()["id"])
+
+
+def test_both_ai_jobs_are_enqueued_when_both_settings_are_on(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session, storage
+) -> None:
+    """The baseline the gating tests are measured against — without this, a
+    gating test could pass simply because the job never appeared anyway."""
+    document_id = _upload(client, auth, employee, category, "Both on")
+    _run_extraction(db_session, storage, document_id)
+
+    assert _followup_job_types(db_session, document_id) == {
+        AiJobType.GENERATE_METADATA,
+        AiJobType.GENERATE_EMBEDDING,
+    }
+
+
+def test_ai_suggestions_off_means_the_metadata_job_is_never_created(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session, storage
+) -> None:
+    """Asserts on the absence of a job row, not on an empty API response: the
+    point of gating at the enqueue site is that no work is created at all — no
+    queue entry, no provider call, no retries, no cost."""
+    organization = db_session.get(Organization, employee.organization_id)
+    assert organization is not None
+    organization.ai_suggestions_enabled = False
+    db_session.flush()
+
+    document_id = _upload(client, auth, employee, category, "Suggestions off")
+    _run_extraction(db_session, storage, document_id)
+
+    # Embeddings are untouched — the two settings are independent.
+    assert _followup_job_types(db_session, document_id) == {AiJobType.GENERATE_EMBEDDING}
+
+
+def test_duplicate_detection_off_means_the_embedding_job_is_never_created(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session, storage
+) -> None:
+    organization = db_session.get(Organization, employee.organization_id)
+    assert organization is not None
+    organization.duplicate_detection_enabled = False
+    db_session.flush()
+
+    document_id = _upload(client, auth, employee, category, "Duplicates off")
+    _run_extraction(db_session, storage, document_id)
+
+    assert _followup_job_types(db_session, document_id) == {AiJobType.GENERATE_METADATA}
+
+
+def test_both_off_means_extraction_still_runs_but_nothing_is_chained(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session, storage
+) -> None:
+    """Text extraction is not an AI setting — search and the extraction badge
+    depend on it, so it must keep working regardless."""
+    organization = db_session.get(Organization, employee.organization_id)
+    assert organization is not None
+    organization.ai_suggestions_enabled = False
+    organization.duplicate_detection_enabled = False
+    db_session.flush()
+
+    document_id = _upload(client, auth, employee, category, "Both off")
+    _run_extraction(db_session, storage, document_id)
+
+    assert _followup_job_types(db_session, document_id) == set()
+
+    detail = client.get(f"/api/v1/documents/{document_id}", headers=auth(employee))
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["extractionStatus"] == "SUCCEEDED"
+
+
+def test_existing_suggestions_are_hidden_not_deleted_when_the_setting_goes_off(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session
+) -> None:
+    """Turning the setting off must hide a suggestion the organization already
+    paid for, and turning it back on must bring the same one back — the row is
+    never destroyed."""
+    document_id = _upload(client, auth, employee, category, "Has a suggestion")
+    document = db_session.get(Document, document_id)
+    assert document is not None and document.current_version_id is not None
+
+    db_session.add(
+        AiDocumentAnalysis(
+            document_version_id=document.current_version_id,
+            organization_id=employee.organization_id,
+            status=AiAnalysisStatus.SUCCEEDED,
+            suggested_title="A generated title",
+            suggested_tags=["alpha"],
+        )
+    )
+    db_session.flush()
+
+    organization = db_session.get(Organization, employee.organization_id)
+    assert organization is not None
+
+    visible = client.get(f"/api/v1/documents/{document_id}", headers=auth(employee))
+    assert visible.json()["aiSuggestion"]["title"] == "A generated title"
+
+    organization.ai_suggestions_enabled = False
+    db_session.flush()
+    hidden = client.get(f"/api/v1/documents/{document_id}", headers=auth(employee))
+    assert hidden.json()["aiSuggestion"] is None
+
+    organization.ai_suggestions_enabled = True
+    db_session.flush()
+    restored = client.get(f"/api/v1/documents/{document_id}", headers=auth(employee))
+    assert restored.json()["aiSuggestion"]["title"] == "A generated title", "the row was destroyed, not hidden"
+
+
+def test_similar_documents_returns_empty_when_duplicate_detection_is_off(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session
+) -> None:
+    document_id = _upload(client, auth, employee, category, "Similarity check")
+    organization = db_session.get(Organization, employee.organization_id)
+    assert organization is not None
+
+    organization.duplicate_detection_enabled = False
+    db_session.flush()
+
+    response = client.get(f"/api/v1/documents/{document_id}/similar", headers=auth(employee))
+    # Empty, not an error — the card hides itself on an empty list, so the
+    # feature disappears without the frontend needing to know why.
+    assert response.status_code == 200, response.text
+    assert response.json() == []
 
 
 def test_ai_settings_travel_with_the_logged_in_user(client: TestClient, auth, employee: User) -> None:

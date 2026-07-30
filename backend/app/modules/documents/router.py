@@ -94,7 +94,7 @@ def create_document(
         review_due_date=metadata.review_due_date,
         current_user=current_user,
     )
-    return to_document_detail(document)
+    return to_document_detail(document, ai_suggestions_enabled=current_user.organization.ai_suggestions_enabled)
 
 
 @router.get("/trash", response_model=PagedTrash)
@@ -122,7 +122,7 @@ def get_document(
 ) -> DocumentDetail:
     document = service.get_detail(document_id, current_user.organization_id)
     service.touch_last_accessed(document)
-    return to_document_detail(document)
+    return to_document_detail(document, ai_suggestions_enabled=current_user.organization.ai_suggestions_enabled)
 
 
 @router.get("/{document_id}/similar", response_model=list[SimilarDocument])
@@ -135,6 +135,14 @@ def get_similar_documents(
 ) -> list[SimilarDocument]:
     # 404s via NotFoundError if missing/inactive/another org's, same as GET /documents/{id}
     service.get_detail(document_id, current_user.organization_id)
+    if not current_user.organization.duplicate_detection_enabled:
+        # Checked before the query rather than filtering its results: with the
+        # setting off there is nothing to compute, so the pgvector search is
+        # skipped entirely. An empty list rather than an error — the card
+        # already hides itself on an empty result, so the feature disappears
+        # with no frontend change. Existing embeddings are left in place;
+        # hiding is reversible, deleting them isn't.
+        return []
     results = similarity.find_similar_documents(
         document_id, organization_id=current_user.organization_id, limit=limit
     )
@@ -151,7 +159,7 @@ def review_ai_suggestion(
     document = service.get_detail(document_id, current_user.organization_id)
     if document.current_version is not None:
         analysis_repo.mark_reviewed(document.current_version.id, accepted_by=current_user.id)
-    return to_document_detail(document)
+    return to_document_detail(document, ai_suggestions_enabled=current_user.organization.ai_suggestions_enabled)
 
 
 @router.patch("/{document_id}", response_model=DocumentDetail)
@@ -171,7 +179,7 @@ def update_document(
         review_due_date=payload.review_due_date,
         owner_id=payload.owner_id,
     )
-    return to_document_detail(document)
+    return to_document_detail(document, ai_suggestions_enabled=current_user.organization.ai_suggestions_enabled)
 
 
 @router.delete("/{document_id}", status_code=204)
@@ -190,7 +198,7 @@ def restore_document(
     current_user: User = Depends(get_current_user),
 ) -> DocumentDetail:
     document = service.restore(document_id, current_user=current_user)
-    return to_document_detail(document)
+    return to_document_detail(document, ai_suggestions_enabled=current_user.organization.ai_suggestions_enabled)
 
 
 @router.delete("/{document_id}/permanent", status_code=204)
