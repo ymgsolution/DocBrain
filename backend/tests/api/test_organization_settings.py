@@ -479,3 +479,147 @@ def test_ai_settings_travel_with_the_logged_in_user(client: TestClient, auth, em
     assert organization["duplicateDetectionEnabled"] is True
     # Never exposed to a tenant: only /platform may see or change the limit.
     assert "storageLimitMb" not in organization
+
+
+# --- Phase 4: the storage limit is enforced ---------------------------------
+
+
+def _set_limit_mb(db_session: Session, organization_id: uuid.UUID, limit_mb: int) -> None:
+    organization = db_session.get(Organization, organization_id)
+    assert organization is not None
+    organization.storage_limit_mb = limit_mb
+    db_session.flush()
+
+
+def _upload_bytes(client: TestClient, auth, user: User, category: Category, payload: bytes, title: str):
+    return client.post(
+        "/api/v1/documents",
+        headers=auth(user),
+        data={"title": title, "categoryId": str(category.id)},
+        files={"file": ("f.txt", io.BytesIO(payload), "text/plain")},
+    )
+
+
+def test_upload_is_allowed_right_up_to_the_limit(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session
+) -> None:
+    """The boundary itself must be usable — a limit of exactly N bytes has to
+    accept a payload that brings usage to exactly N, not reject it."""
+    repository = DocumentRepository(db_session)
+    used = repository.storage_used_bytes(employee.organization_id)
+    payload = b"x" * 1000
+    # Limit is stored in MB, so round the target up to a whole MB and fill the
+    # remainder exactly.
+    limit_mb = (used + len(payload) + (1024 * 1024 - 1)) // (1024 * 1024)
+    _set_limit_mb(db_session, employee.organization_id, limit_mb)
+    headroom = limit_mb * 1024 * 1024 - used
+
+    exactly_full = _upload_bytes(client, auth, employee, category, b"x" * headroom, "Exactly at the limit")
+    assert exactly_full.status_code == 201, exactly_full.text
+    assert repository.storage_used_bytes(employee.organization_id) == limit_mb * 1024 * 1024
+
+
+def test_upload_over_the_limit_is_refused_with_a_friendly_message(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session
+) -> None:
+    repository = DocumentRepository(db_session)
+    used = repository.storage_used_bytes(employee.organization_id)
+    limit_mb = max(1, used // (1024 * 1024))
+    _set_limit_mb(db_session, employee.organization_id, limit_mb)
+
+    response = _upload_bytes(client, auth, employee, category, b"y" * (2 * 1024 * 1024), "Too big for the org")
+
+    assert response.status_code == 413, response.text
+    body = response.json()["error"]
+    assert body["message"] == (
+        "Your organization has reached its storage limit. Please contact your administrator."
+    )
+    # Nothing was written — no document row, and usage is untouched.
+    assert repository.storage_used_bytes(employee.organization_id) == used
+    listed = client.get("/api/v1/documents", headers=auth(employee)).json()
+    titles = [d["title"] for d in listed.get("items", listed)]
+    assert "Too big for the org" not in titles
+
+
+def test_a_small_file_is_still_refused_once_the_org_is_full(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session
+) -> None:
+    """The organization limit is independent of the per-file limit: a file far
+    below max_upload_size_mb must still be refused when there's no room."""
+    repository = DocumentRepository(db_session)
+    _set_limit_mb(db_session, employee.organization_id, max(1, repository.storage_used_bytes(employee.organization_id) // (1024 * 1024)))
+
+    response = _upload_bytes(client, auth, employee, category, b"tiny", "A tiny file")
+    assert response.status_code == 413, response.text
+
+
+def test_new_versions_are_also_subject_to_the_limit(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session
+) -> None:
+    """A new version adds to storage rather than replacing, so enforcing only
+    the create path would leave an unbounded way to grow."""
+    repository = DocumentRepository(db_session)
+    created = _upload_bytes(client, auth, employee, category, b"v1", "Versioned under quota")
+    assert created.status_code == 201, created.text
+    document_id = created.json()["id"]
+
+    _set_limit_mb(db_session, employee.organization_id, max(1, repository.storage_used_bytes(employee.organization_id) // (1024 * 1024)))
+
+    response = client.post(
+        f"/api/v1/documents/{document_id}/versions",
+        headers=auth(employee),
+        data={"changeNote": "should be refused"},
+        files={"file": ("f.txt", io.BytesIO(b"z" * (2 * 1024 * 1024)), "text/plain")},
+    )
+    assert response.status_code == 413, response.text
+
+
+def test_restoring_a_version_is_also_subject_to_the_limit(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session
+) -> None:
+    """Restore physically copies the file and inserts a new row, so it spends
+    storage exactly like an upload — the path most easily forgotten."""
+    repository = DocumentRepository(db_session)
+    created = _upload_bytes(client, auth, employee, category, b"original contents", "Restorable")
+    assert created.status_code == 201, created.text
+    document_id = created.json()["id"]
+    second = client.post(
+        f"/api/v1/documents/{document_id}/versions",
+        headers=auth(employee),
+        data={"changeNote": "second revision"},
+        files={"file": ("f.txt", io.BytesIO(b"newer contents"), "text/plain")},
+    )
+    assert second.status_code == 201, second.text
+
+    _set_limit_mb(db_session, employee.organization_id, max(1, repository.storage_used_bytes(employee.organization_id) // (1024 * 1024)))
+    before = repository.storage_used_bytes(employee.organization_id)
+
+    response = client.post(
+        f"/api/v1/documents/{document_id}/versions/1/restore",
+        headers=auth(employee),
+        json={"changeNote": "restoring v1"},
+    )
+    assert response.status_code == 413, response.text
+    assert repository.storage_used_bytes(employee.organization_id) == before
+
+
+def test_the_limit_is_per_organization(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session
+) -> None:
+    """One organization filling up must not block another's uploads."""
+    repository = DocumentRepository(db_session)
+    _set_limit_mb(db_session, employee.organization_id, max(1, repository.storage_used_bytes(employee.organization_id) // (1024 * 1024)))
+    assert _upload_bytes(client, auth, employee, category, b"blocked", "Blocked").status_code == 413
+
+    other_org_id = uuid.uuid4()
+    db_session.execute(
+        text("INSERT INTO organizations (id, name, slug) VALUES (:id, :name, :slug)"),
+        {"id": other_org_id, "name": "Roomy Org", "slug": f"roomy-{other_org_id.hex[:8]}"},
+    )
+    db_session.flush()
+
+    # The other organization is untouched by the first one being full.
+    other = db_session.get(Organization, other_org_id)
+    assert other is not None
+    assert other.storage_limit_mb == DEFAULT_STORAGE_LIMIT_MB
+    assert repository.storage_used_bytes(other_org_id) == 0

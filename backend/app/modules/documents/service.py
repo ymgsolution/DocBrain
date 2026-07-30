@@ -10,6 +10,7 @@ from app.modules.documents.repository import DocumentRepository
 from app.storage.checksum import sha256_of_stream
 from app.storage.factory import get_storage
 from app.storage.port import StoragePort
+from app.utils.storage_quota import validate_organization_quota
 from app.utils.file_validation import (
     sniff_mime_type,
     validate_content_matches_extension,
@@ -75,9 +76,28 @@ class DocumentService:
         validate_content_matches_extension(ext, mime_type)
 
         temp_path = self.storage.save_temp(raw)
+
+        # Size-based validation sits in its own block, before anything is
+        # written. Both checks need the real byte count, which only exists
+        # once the upload has been streamed to a temp file — a client-declared
+        # size can't be trusted. Kept out of the transaction block below
+        # because a rejection here has written no rows, so there is nothing to
+        # roll back: only the temp file needs discarding. (Rolling back
+        # regardless would also unwind whatever the caller's session was
+        # already holding, which is not this function's business.)
         try:
             size_bytes = temp_path.stat().st_size
             validate_size(size_bytes)
+            validate_organization_quota(
+                self.repository.db,
+                organization_id=current_user.organization_id,
+                incoming_bytes=size_bytes,
+            )
+        except Exception:
+            self.storage.discard(temp_path)
+            raise
+
+        try:
             with open(temp_path, "rb") as f:
                 checksum = sha256_of_stream(f)
 
