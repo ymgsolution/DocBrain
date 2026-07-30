@@ -316,3 +316,178 @@ def test_invitation_accept_assigns_inviting_admins_organization(
     )
     assert accept.status_code == 201, accept.text
     assert accept.json()["organization"]["id"] == str(other_org_id)
+
+
+# --- versions ----------------------------------------------------------
+
+
+def test_cannot_list_another_orgs_document_versions(
+    client: TestClient, auth, admin: User, other_org_admin: User, other_org_category: Category
+) -> None:
+    theirs = _upload(client, auth(other_org_admin), other_org_category.id, title="Their versioned doc")
+
+    response = client.get(f"/api/v1/documents/{theirs['id']}/versions", headers=auth(admin))
+    assert response.status_code == 404, response.text
+
+
+def test_cannot_upload_a_version_onto_another_orgs_document(
+    client: TestClient, auth, admin: User, other_org_admin: User, other_org_category: Category
+) -> None:
+    theirs = _upload(client, auth(other_org_admin), other_org_category.id, title="Their doc")
+
+    response = client.post(
+        f"/api/v1/documents/{theirs['id']}/versions",
+        headers=auth(admin),
+        data={"changeNote": "not mine to change"},
+        files={"file": ("notes.txt", io.BytesIO(b"intruding"), "text/plain")},
+    )
+    assert response.status_code == 404, response.text
+
+
+def test_cannot_download_another_orgs_version_content(
+    client: TestClient, auth, admin: User, other_org_admin: User, other_org_category: Category
+) -> None:
+    """The one that would leak actual file bytes rather than metadata."""
+    theirs = _upload(client, auth(other_org_admin), other_org_category.id, title="Their doc")
+
+    response = client.get(f"/api/v1/documents/{theirs['id']}/versions/1/content", headers=auth(admin))
+    assert response.status_code == 404, response.text
+    assert b"secret contents" not in response.content
+
+
+def test_cannot_restore_another_orgs_version(
+    client: TestClient, auth, admin: User, other_org_admin: User, other_org_category: Category
+) -> None:
+    theirs = _upload(client, auth(other_org_admin), other_org_category.id, title="Their doc")
+    second = client.post(
+        f"/api/v1/documents/{theirs['id']}/versions",
+        headers=auth(other_org_admin),
+        data={"changeNote": "their second revision"},
+        files={"file": ("notes.txt", io.BytesIO(b"their v2"), "text/plain")},
+    )
+    assert second.status_code == 201, second.text
+
+    response = client.post(
+        f"/api/v1/documents/{theirs['id']}/versions/1/restore", headers=auth(admin), json={}
+    )
+    assert response.status_code == 404, response.text
+
+
+# --- tags --------------------------------------------------------------
+
+
+def test_tag_vocabularies_are_per_organization(
+    client: TestClient, auth, admin: User, category: Category, other_org_admin: User, other_org_category: Category
+) -> None:
+    """Tags moved from globally unique to unique *per organization* in the
+    Phase 4 migration, so the same tag name must be able to exist in two
+    organizations as two independent rows."""
+    shared_name = f"shared-{uuid.uuid4().hex[:8]}"
+
+    mine = client.post(
+        "/api/v1/documents",
+        headers=auth(admin),
+        data={"title": "Mine", "categoryId": str(category.id), "tags": shared_name},
+        files={"file": ("notes.txt", io.BytesIO(b"mine"), "text/plain")},
+    )
+    assert mine.status_code == 201, mine.text
+    theirs = client.post(
+        "/api/v1/documents",
+        headers=auth(other_org_admin),
+        data={"title": "Theirs", "categoryId": str(other_org_category.id), "tags": shared_name},
+        files={"file": ("notes.txt", io.BytesIO(b"theirs"), "text/plain")},
+    )
+    assert theirs.status_code == 201, theirs.text
+
+    my_tag_ids = {t["id"] for t in mine.json()["tags"]}
+    their_tag_ids = {t["id"] for t in theirs.json()["tags"]}
+    assert my_tag_ids and their_tag_ids
+    assert my_tag_ids.isdisjoint(their_tag_ids), "the same tag name reused one row across organizations"
+
+
+def test_list_tags_excludes_another_orgs_tags(
+    client: TestClient, auth, admin: User, other_org_admin: User, other_org_category: Category
+) -> None:
+    their_tag = f"theirtag-{uuid.uuid4().hex[:8]}"
+    created = client.post(
+        "/api/v1/documents",
+        headers=auth(other_org_admin),
+        data={"title": "Theirs", "categoryId": str(other_org_category.id), "tags": their_tag},
+        files={"file": ("notes.txt", io.BytesIO(b"theirs"), "text/plain")},
+    )
+    assert created.status_code == 201, created.text
+
+    listed = client.get("/api/v1/tags", headers=auth(admin))
+    assert listed.status_code == 200, listed.text
+    assert their_tag not in {t["name"] for t in listed.json()}
+
+
+# --- trash -------------------------------------------------------------
+
+
+def test_trash_excludes_another_orgs_deleted_documents(
+    client: TestClient, auth, admin: User, other_org_admin: User, other_org_category: Category
+) -> None:
+    theirs = _upload(client, auth(other_org_admin), other_org_category.id, title="Their doomed doc")
+    assert client.delete(f"/api/v1/documents/{theirs['id']}", headers=auth(other_org_admin)).status_code == 204
+
+    listed = client.get("/api/v1/documents/trash", headers=auth(admin))
+    assert listed.status_code == 200, listed.text
+    body = listed.json()
+    assert theirs["id"] not in {d["id"] for d in body.get("items", body)}
+
+
+def test_cannot_restore_or_purge_another_orgs_trashed_document(
+    client: TestClient, auth, admin: User, other_org_admin: User, other_org_category: Category
+) -> None:
+    theirs = _upload(client, auth(other_org_admin), other_org_category.id, title="Their doomed doc")
+    assert client.delete(f"/api/v1/documents/{theirs['id']}", headers=auth(other_org_admin)).status_code == 204
+
+    assert client.post(f"/api/v1/documents/{theirs['id']}/restore", headers=auth(admin)).status_code == 404
+    assert client.delete(f"/api/v1/documents/{theirs['id']}/permanent", headers=auth(admin)).status_code == 404
+
+
+# --- ownership reassignment --------------------------------------------
+
+
+def test_cannot_reassign_a_document_to_another_orgs_user(
+    client: TestClient, auth, admin: User, category: Category, other_org_employee: User
+) -> None:
+    """PATCH used to write owner_id straight onto the row with no lookup, so a
+    user id from another tenant would transfer the document across the
+    isolation boundary and render that person's name and email here."""
+    mine = _upload(client, auth(admin), category.id, title="Mine")
+
+    response = client.patch(
+        f"/api/v1/documents/{mine['id']}", headers=auth(admin), json={"ownerId": str(other_org_employee.id)}
+    )
+    assert response.status_code == 422, response.text
+
+    unchanged = client.get(f"/api/v1/documents/{mine['id']}", headers=auth(admin)).json()
+    assert unchanged["owner"]["id"] == str(admin.id)
+
+
+def test_cannot_reassign_a_document_to_a_nonexistent_user(
+    client: TestClient, auth, admin: User, category: Category
+) -> None:
+    """Previously an IntegrityError on the FK, surfacing as a 500 because
+    error_handlers only maps DomainError/RequestValidationError."""
+    mine = _upload(client, auth(admin), category.id, title="Mine")
+
+    response = client.patch(
+        f"/api/v1/documents/{mine['id']}", headers=auth(admin), json={"ownerId": str(uuid.uuid4())}
+    )
+    assert response.status_code == 422, response.text
+
+
+def test_reassigning_to_a_colleague_in_the_same_organization_still_works(
+    client: TestClient, auth, admin: User, employee: User, category: Category
+) -> None:
+    """The guard must not break the legitimate case."""
+    mine = _upload(client, auth(admin), category.id, title="Mine")
+
+    response = client.patch(
+        f"/api/v1/documents/{mine['id']}", headers=auth(admin), json={"ownerId": str(employee.id)}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["owner"]["id"] == str(employee.id)

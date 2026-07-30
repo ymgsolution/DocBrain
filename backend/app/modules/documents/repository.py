@@ -3,7 +3,7 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.db.models import Category, Document, DocumentExtractedText, DocumentTag, DocumentVersion, Tag
+from app.db.models import Category, Document, DocumentExtractedText, DocumentTag, DocumentVersion, Tag, User
 from app.db.models.enums import DocumentStatus
 
 
@@ -176,6 +176,27 @@ class DocumentRepository:
 
     def get_category(self, category_id: uuid.UUID, organization_id: uuid.UUID) -> Category | None:
         stmt = select(Category).where(Category.id == category_id, Category.organization_id == organization_id)
+        return self.db.scalar(stmt)
+
+    def get_assignable_owner(self, user_id: uuid.UUID, organization_id: uuid.UUID) -> User | None:
+        """A user who may be made the owner of this organization's document.
+
+        Organization-scoped for the same reason get_category above is: without
+        it, PATCH /documents/{id} would accept any user id at all and hand a
+        document to someone in another tenant, whose name and email would then
+        render in this organization's document list.
+
+        Active-only deliberately. Ownership carries responsibility — reviews,
+        deletion rights — and the colleague directory a picker draws from
+        (AuthRepository.list_active_users) already shows only active people,
+        so accepting a deactivated one could only come from a stale UI or a
+        hand-made request.
+        """
+        stmt = select(User).where(
+            User.id == user_id,
+            User.organization_id == organization_id,
+            User.is_active.is_(True),
+        )
         return self.db.scalar(stmt)
 
     def storage_used_bytes(self, organization_id: uuid.UUID) -> int:

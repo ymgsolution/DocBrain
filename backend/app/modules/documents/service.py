@@ -233,7 +233,20 @@ class DocumentService:
         if review_due_date is not None:
             document.review_due_date = review_due_date
         if owner_id is not None:
-            document.owner_id = owner_id
+            # Resolved against the caller's organization, exactly like the
+            # category branch above. Without this the id was written straight
+            # onto the row unchecked: a user id from another tenant would
+            # transfer the document across the isolation boundary and render
+            # that person's name and email in this organization's list, and a
+            # stale id would surface as a 500 from the FK rather than a
+            # field error, since IntegrityError isn't handled.
+            new_owner = self.repository.get_assignable_owner(owner_id, current_user.organization_id)
+            if new_owner is None:
+                raise ValidationError(
+                    "That person isn't an active member of your organization.",
+                    fields=[{"field": "owner_id", "message": "Choose an active colleague."}],
+                )
+            document.owner_id = new_owner.id
         if tag_names is not None:
             self.repository.clear_tags(document.id)
             tags = self.repository.get_or_create_tags(tag_names, current_user.organization_id)
