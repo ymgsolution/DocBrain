@@ -43,7 +43,15 @@ def main() -> None:
             if already_queued or already_extracted:
                 skipped += 1
                 continue
-            repository.enqueue(job_type=AiJobType.EXTRACT, document_version_id=version_id)
+            # organization_id became required on AiJob in the multi-tenant
+            # migration; taken from the document being backfilled rather than
+            # a single global value, since this script deliberately sweeps
+            # every organization at once.
+            repository.enqueue(
+                job_type=AiJobType.EXTRACT,
+                document_version_id=version_id,
+                organization_id=document.organization_id,
+            )
             enqueued += 1
 
         db.commit()
