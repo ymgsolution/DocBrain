@@ -50,12 +50,18 @@ export default function TrashPage() {
   return (
     <div className="space-y-6">
       <AppBreadcrumb segments={[{ label: "Trash" }]} />
+      {/* The storage note is the important half. Deleting a document moves
+          it here but leaves its file on disk, so it keeps counting against
+          the organization's storage limit — an admin who deletes things to
+          make room and sees the number refuse to move has no way to guess
+          why. Only a permanent delete frees the space, and only an admin can
+          do that, so the two audiences need different sentences. */}
       <PageHeader
         title="Trash"
         description={
           isAdmin
-            ? "Deleted documents across the organization. Restore or permanently delete."
-            : "Documents you've deleted. Restore them any time."
+            ? "Deleted documents across the organization. Restore, or permanently delete to free up storage — documents in Trash still count toward your storage limit."
+            : "Documents you've deleted. Restore them any time. They still count toward your organization's storage limit until an admin permanently deletes them."
         }
       />
 

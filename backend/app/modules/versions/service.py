@@ -10,6 +10,7 @@ from app.modules.versions.repository import VersionRepository
 from app.storage.checksum import sha256_of_stream
 from app.storage.factory import get_storage
 from app.storage.port import StoragePort
+from app.utils.storage_quota import validate_organization_quota
 from app.utils.file_validation import (
     sniff_mime_type,
     validate_content_matches_extension,
@@ -77,9 +78,25 @@ class VersionService:
         validate_content_matches_extension(ext, mime_type)
 
         temp_path = self.storage.save_temp(raw)
+
+        # Same split as create_document: size-based validation first, outside
+        # the transaction block, since a rejection here has written nothing
+        # and only the temp file needs cleaning up. A new version *adds* to
+        # storage rather than replacing — the previous version's file stays on
+        # disk — so the quota applies here just as much as on create.
         try:
             size_bytes = temp_path.stat().st_size
             validate_size(size_bytes)
+            validate_organization_quota(
+                self.repository.db,
+                organization_id=current_user.organization_id,
+                incoming_bytes=size_bytes,
+            )
+        except Exception:
+            self.storage.discard(temp_path)
+            raise
+
+        try:
             with open(temp_path, "rb") as f:
                 checksum = sha256_of_stream(f)
 
@@ -143,6 +160,18 @@ class VersionService:
             raise NotFoundError("That version doesn't exist.")
         if document.current_version_id == source.id:
             raise ValidationError("This is already the current version.")
+
+        # Restore is the third path that consumes storage, and the easiest to
+        # miss: it physically copies the source file and inserts a new version
+        # row with the same size_bytes, so the organization pays for those
+        # bytes twice. Checked before the copy rather than after — there is no
+        # temp file to discard here, so a late refusal would leave an orphaned
+        # object in storage.
+        validate_organization_quota(
+            self.repository.db,
+            organization_id=current_user.organization_id,
+            incoming_bytes=source.size_bytes,
+        )
 
         new_version_number = self.repository.next_version_number(document_id)
         new_storage_path = self.storage.build_storage_path(document.id, new_version_number, source.original_filename)
