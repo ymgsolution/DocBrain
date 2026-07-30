@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_platform_admin
-from app.db.models import PlatformAdmin
+from app.db.models import Organization, PlatformAdmin
 from app.db.session import get_db_session
 from app.modules.auth.repository import AuthRepository
 from app.modules.platform.auth_service import PlatformAuthService
@@ -17,10 +17,12 @@ from app.schemas.platform import (
     OrganizationCreate,
     OrganizationCreated,
     OrganizationSettings,
+    OrganizationSettingsUpdate,
     OrganizationStats,
     PlatformAdminSummary,
     PlatformLoginRequest,
     PlatformTokenResponse,
+    StorageBreakdown,
 )
 
 # A fully separate namespace from /api/v1/* — see PlatformAdmin's docstring
@@ -51,6 +53,14 @@ def me(current_admin: PlatformAdmin = Depends(get_current_platform_admin)) -> Pl
     return current_admin
 
 
+def _to_settings(organization: Organization) -> OrganizationSettings:
+    return OrganizationSettings(
+        ai_suggestions_enabled=organization.ai_suggestions_enabled,
+        duplicate_detection_enabled=organization.duplicate_detection_enabled,
+        storage_limit_mb=organization.storage_limit_mb,
+    )
+
+
 @router.get("/organizations", response_model=list[OrganizationStats])
 def list_organizations(
     service: OrganizationsService = Depends(get_organizations_service),
@@ -65,15 +75,38 @@ def list_organizations(
             user_count=user_count,
             active_user_count=active_user_count,
             document_count=document_count,
-            settings=OrganizationSettings(
-                ai_suggestions_enabled=org.ai_suggestions_enabled,
-                duplicate_detection_enabled=org.duplicate_detection_enabled,
-                storage_limit_mb=org.storage_limit_mb,
+            settings=_to_settings(org),
+            storage=StorageBreakdown(
+                active_current_bytes=active_current,
+                superseded_bytes=superseded,
+                trashed_bytes=trashed,
+                total_bytes=active_current + superseded + trashed,
             ),
-            storage_used_bytes=storage_used_bytes,
         )
-        for org, user_count, active_user_count, document_count, storage_used_bytes in service.list_organizations()
+        for org, user_count, active_user_count, document_count, active_current, superseded, trashed in (
+            service.list_organizations()
+        )
     ]
+
+
+@router.patch("/organizations/{organization_id}/settings", response_model=OrganizationSettings)
+def update_organization_settings(
+    organization_id: uuid.UUID,
+    payload: OrganizationSettingsUpdate,
+    service: OrganizationsService = Depends(get_organizations_service),
+    current_admin: PlatformAdmin = Depends(get_current_platform_admin),
+) -> OrganizationSettings:
+    """Platform admins only — deliberately the single place these can change.
+    A tenant admin raising their own storage limit would be a straightforward
+    privilege escalation, which is why the two AI flags are exposed read-only
+    on /auth/me and the limit isn't exposed to tenants at all."""
+    organization = service.update_settings(
+        organization_id,
+        ai_suggestions_enabled=payload.ai_suggestions_enabled,
+        duplicate_detection_enabled=payload.duplicate_detection_enabled,
+        storage_limit_mb=payload.storage_limit_mb,
+    )
+    return _to_settings(organization)
 
 
 @router.post("/organizations", response_model=OrganizationCreated, status_code=201)

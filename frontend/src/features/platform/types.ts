@@ -16,6 +16,23 @@ export interface OrganizationSettings {
   storageLimitMb: number;
 }
 
+/**
+ * The storage total split into what it's actually made of. Shown as a
+ * breakdown rather than one number because the total reads as wrong
+ * otherwise: the app displays current versions of active documents, but the
+ * limit counts every byte on disk. Measured live, that gap is 38% for the
+ * largest organization. The three parts always sum to totalBytes.
+ */
+export interface StorageBreakdown {
+  /** Current versions of active documents — what a user sees in the app. */
+  activeCurrentBytes: number;
+  /** Older versions kept by the append-only version history. */
+  supersededBytes: number;
+  /** Documents in Trash. Still on disk until a permanent delete. */
+  trashedBytes: number;
+  totalBytes: number;
+}
+
 export interface OrganizationStats {
   id: string;
   name: string;
@@ -25,15 +42,14 @@ export interface OrganizationStats {
   activeUserCount: number;
   documentCount: number;
   settings: OrganizationSettings;
-  /**
-   * Every version's bytes, including superseded versions and documents in
-   * Trash — those files are still on disk, and only a permanent delete
-   * removes them. This is the figure storageLimitMb is measured against, and
-   * it can be substantially higher than the sizes a user sees in the app
-   * (measured on live data: 29.5 MB visible vs 47.9 MB stored). Bytes rather
-   * than MB so formatFileSize() can render it.
-   */
-  storageUsedBytes: number;
+  storage: StorageBreakdown;
+}
+
+/** Every field optional — omitting one leaves it unchanged. */
+export interface OrganizationSettingsUpdateRequest {
+  aiSuggestionsEnabled?: boolean;
+  duplicateDetectionEnabled?: boolean;
+  storageLimitMb?: number;
 }
 
 export interface OrganizationCreateRequest {

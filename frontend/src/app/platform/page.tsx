@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Building2, LogOut, Plus, UserPlus } from "lucide-react";
+import { Building2, LogOut, Plus, Settings2, UserPlus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/shared/page-header";
 import { CreateFirstAdminDialog } from "@/features/platform/components/create-first-admin-dialog";
 import { CreateOrganizationDialog } from "@/features/platform/components/create-organization-dialog";
 import { IncompleteSetupBanner } from "@/features/platform/components/incomplete-setup-banner";
+import { OrganizationSettingsDialog } from "@/features/platform/components/organization-settings-dialog";
 import { useCurrentPlatformAdmin, useOrganizations, usePlatformLogout } from "@/features/platform/hooks";
 import { formatRelativeTime } from "@/lib/format";
 import type { OrganizationStats } from "@/features/platform/types";
@@ -23,6 +24,13 @@ export default function PlatformDashboardPage() {
 
   const [createOrgOpen, setCreateOrgOpen] = useState(false);
   const [adminTarget, setAdminTarget] = useState<OrganizationStats | null>(null);
+  // Held as an id, not the row object: the settings dialog *displays* live
+  // values (toggles and storage figures), and a captured object would keep
+  // showing whatever was true at click time — stale straight after a save,
+  // and stale again on any background refetch. Deriving it from the query
+  // data each render means the dialog always reflects the server.
+  const [settingsOrgId, setSettingsOrgId] = useState<string | null>(null);
+  const settingsTarget = organizations?.find((org) => org.id === settingsOrgId) ?? null;
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
@@ -112,15 +120,26 @@ export default function PlatformDashboardPage() {
                     <TableCell>{org.documentCount}</TableCell>
                     <TableCell className="text-muted-foreground">{formatRelativeTime(org.createdAt)}</TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant={needsAdmin ? "default" : "outline"}
-                        size="sm"
-                        className="gap-1.5"
-                        onClick={() => setAdminTarget(org)}
-                      >
-                        <UserPlus className="size-4" />
-                        {needsAdmin ? "Create admin" : "Add admin"}
-                      </Button>
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-1.5"
+                          onClick={() => setSettingsOrgId(org.id)}
+                        >
+                          <Settings2 className="size-4" />
+                          Settings
+                        </Button>
+                        <Button
+                          variant={needsAdmin ? "default" : "outline"}
+                          size="sm"
+                          className="gap-1.5"
+                          onClick={() => setAdminTarget(org)}
+                        >
+                          <UserPlus className="size-4" />
+                          {needsAdmin ? "Create admin" : "Add admin"}
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 );
@@ -131,6 +150,14 @@ export default function PlatformDashboardPage() {
       )}
 
       <CreateOrganizationDialog open={createOrgOpen} onOpenChange={setCreateOrgOpen} />
+
+      {settingsTarget && (
+        <OrganizationSettingsDialog
+          open={Boolean(settingsTarget)}
+          onOpenChange={(open) => !open && setSettingsOrgId(null)}
+          organization={settingsTarget}
+        />
+      )}
 
       {adminTarget && (
         <CreateFirstAdminDialog

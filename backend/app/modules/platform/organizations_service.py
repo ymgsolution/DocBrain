@@ -36,8 +36,43 @@ class OrganizationsService:
         self.repository = repository
         self.users = users
 
-    def list_organizations(self) -> list[tuple[Organization, int, int, int, int]]:
+    def list_organizations(self) -> list[tuple[Organization, int, int, int, int, int, int]]:
         return self.repository.list_with_stats()
+
+    def update_settings(
+        self,
+        organization_id: uuid.UUID,
+        *,
+        ai_suggestions_enabled: bool | None,
+        duplicate_detection_enabled: bool | None,
+        storage_limit_mb: int | None,
+    ) -> Organization:
+        """Partial update — None means "leave this one alone", so changing a
+        single toggle doesn't require the caller to restate the other two and
+        can't accidentally clobber a value it never intended to touch.
+
+        Deliberately permits a limit below the organization's current usage.
+        Blocking that would be the wrong call: an organization that has
+        already overrun is exactly the one an operator most needs to be able
+        to cap, and the effect is only that further uploads are refused until
+        space is freed — nothing existing is deleted or hidden. The settings
+        screen surfaces the over-limit state so it's a visible choice rather
+        than a silent one.
+        """
+        organization = self.repository.get_by_id(organization_id)
+        if organization is None:
+            raise NotFoundError("This organization doesn't exist.")
+
+        if ai_suggestions_enabled is not None:
+            organization.ai_suggestions_enabled = ai_suggestions_enabled
+        if duplicate_detection_enabled is not None:
+            organization.duplicate_detection_enabled = duplicate_detection_enabled
+        if storage_limit_mb is not None:
+            organization.storage_limit_mb = storage_limit_mb
+
+        self.repository.db.commit()
+        self.repository.db.refresh(organization)
+        return organization
 
     def _unique_slug(self, base: str) -> str:
         base_slug = slugify(base)

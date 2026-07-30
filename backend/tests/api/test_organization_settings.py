@@ -1,6 +1,9 @@
-"""Organization Settings — Phase 1 (the data exists and is readable).
+"""Organization Settings — Phases 1 and 2 (the data exists, is readable, and
+a platform admin can change it). Nothing is *enforced* yet: the AI toggles
+start gating work in Phase 3 and the storage limit in Phase 4, so these tests
+deliberately assert on stored values and responses, not on behaviour changing.
 
-Two things are worth proving here rather than assuming.
+Several things are worth proving here rather than assuming.
 
 First, that a new organization gets working settings *without anyone having
 to create them*. These are NOT NULL columns with a server_default precisely
@@ -71,7 +74,7 @@ def test_new_organization_gets_working_settings_without_anyone_creating_them(
     assert organization["settings"]["duplicateDetectionEnabled"] is DEFAULT_DUPLICATE_DETECTION_ENABLED
     assert organization["settings"]["storageLimitMb"] == DEFAULT_STORAGE_LIMIT_MB
     # Brand new organization, so nothing stored yet — and 0, never null.
-    assert organization["storageUsedBytes"] == 0
+    assert organization["storage"]["totalBytes"] == 0
 
 
 def test_storage_usage_counts_every_version_not_just_the_current_one(
@@ -98,7 +101,7 @@ def test_storage_usage_counts_every_version_not_just_the_current_one(
     new_version = client.post(
         f"/api/v1/documents/{document_id}/versions",
         headers=auth(employee),
-        data={"changeNote": "second"},
+        data={"changeNote": "second revision"},
         files={"file": ("doc.txt", io.BytesIO(v2), "text/plain")},
     )
     assert new_version.status_code == 201, new_version.text
@@ -172,6 +175,129 @@ def test_storage_usage_is_per_organization(
     assert upload.status_code == 201, upload.text
 
     assert repository.storage_used_bytes(other_org_id) == before_other
+
+
+def test_storage_breakdown_parts_always_sum_to_the_total(
+    client: TestClient, auth, admin: User, category: Category, platform_admin: PlatformAdmin
+) -> None:
+    """The three parts partition every version exactly once, so they must add
+    up. Built here from a document that lands in all three buckets at once:
+    two versions (one current, one superseded) plus a second document sitting
+    in Trash."""
+    live = client.post(
+        "/api/v1/documents",
+        headers=auth(admin),
+        data={"title": "Kept", "categoryId": str(category.id)},
+        files={"file": ("kept.txt", io.BytesIO(b"v1 of the kept document"), "text/plain")},
+    )
+    assert live.status_code == 201, live.text
+    superseded = client.post(
+        f"/api/v1/documents/{live.json()['id']}/versions",
+        headers=auth(admin),
+        data={"changeNote": "second revision"},
+        files={"file": ("kept.txt", io.BytesIO(b"v2 of the kept document, longer"), "text/plain")},
+    )
+    assert superseded.status_code == 201, superseded.text
+
+    doomed = client.post(
+        "/api/v1/documents",
+        headers=auth(admin),
+        data={"title": "Trashed", "categoryId": str(category.id)},
+        files={"file": ("trashed.txt", io.BytesIO(b"headed for the trash"), "text/plain")},
+    )
+    assert doomed.status_code == 201, doomed.text
+    assert client.delete(f"/api/v1/documents/{doomed.json()['id']}", headers=auth(admin)).status_code == 204
+
+    headers = _platform_auth(client, platform_admin)
+    listed = client.get(ORGANIZATIONS, headers=headers).json()
+    organization = next(o for o in listed if o["id"] == str(admin.organization_id))
+    storage = organization["storage"]
+
+    assert (
+        storage["activeCurrentBytes"] + storage["supersededBytes"] + storage["trashedBytes"]
+        == storage["totalBytes"]
+    )
+    # All three buckets are genuinely populated, so this isn't passing by
+    # everything being zero.
+    assert storage["activeCurrentBytes"] > 0
+    assert storage["supersededBytes"] > 0
+    assert storage["trashedBytes"] > 0
+
+
+def test_platform_admin_can_change_each_setting_independently(
+    client: TestClient, platform_admin: PlatformAdmin
+) -> None:
+    headers = _platform_auth(client, platform_admin)
+    org_id = client.post(ORGANIZATIONS, headers=headers, json={"name": f"Org {uuid.uuid4().hex[:8]}"}).json()["id"]
+    settings_url = f"{ORGANIZATIONS}/{org_id}/settings"
+
+    turned_off = client.patch(settings_url, headers=headers, json={"aiSuggestionsEnabled": False})
+    assert turned_off.status_code == 200, turned_off.text
+    body = turned_off.json()
+    assert body["aiSuggestionsEnabled"] is False
+    # Omitted fields are untouched, not reset — the whole point of PATCH here.
+    assert body["duplicateDetectionEnabled"] is True
+    assert body["storageLimitMb"] == DEFAULT_STORAGE_LIMIT_MB
+
+    resized = client.patch(settings_url, headers=headers, json={"storageLimitMb": 500})
+    assert resized.status_code == 200, resized.text
+    assert resized.json()["storageLimitMb"] == 500
+    # ...and the earlier change survived the second PATCH.
+    assert resized.json()["aiSuggestionsEnabled"] is False
+
+
+def test_settings_changes_are_isolated_to_one_organization(
+    client: TestClient, platform_admin: PlatformAdmin
+) -> None:
+    headers = _platform_auth(client, platform_admin)
+    first = client.post(ORGANIZATIONS, headers=headers, json={"name": f"A {uuid.uuid4().hex[:8]}"}).json()["id"]
+    second = client.post(ORGANIZATIONS, headers=headers, json={"name": f"B {uuid.uuid4().hex[:8]}"}).json()["id"]
+
+    client.patch(
+        f"{ORGANIZATIONS}/{first}/settings",
+        headers=headers,
+        json={"aiSuggestionsEnabled": False, "duplicateDetectionEnabled": False, "storageLimitMb": 5},
+    )
+
+    listed = {o["id"]: o for o in client.get(ORGANIZATIONS, headers=headers).json()}
+    assert listed[second]["settings"]["aiSuggestionsEnabled"] is True
+    assert listed[second]["settings"]["duplicateDetectionEnabled"] is True
+    assert listed[second]["settings"]["storageLimitMb"] == DEFAULT_STORAGE_LIMIT_MB
+
+
+@pytest.mark.parametrize("bad_limit", [0, -1, 1_000_001])
+def test_storage_limit_is_bounded(client: TestClient, platform_admin: PlatformAdmin, bad_limit: int) -> None:
+    """0 would lock an organization out of uploading with no way back from
+    its own side, and an unbounded upper value makes the limit meaningless."""
+    headers = _platform_auth(client, platform_admin)
+    org_id = client.post(ORGANIZATIONS, headers=headers, json={"name": f"Org {uuid.uuid4().hex[:8]}"}).json()["id"]
+
+    response = client.patch(
+        f"{ORGANIZATIONS}/{org_id}/settings", headers=headers, json={"storageLimitMb": bad_limit}
+    )
+    assert response.status_code == 422, response.text
+
+
+def test_settings_patch_rejects_a_tenant_token(client: TestClient, auth, admin: User) -> None:
+    """The privilege-escalation guard: an organization admin must not be able
+    to raise their own storage limit or re-enable a feature the platform
+    switched off."""
+    response = client.patch(
+        f"{ORGANIZATIONS}/{admin.organization_id}/settings",
+        headers=auth(admin),
+        json={"storageLimitMb": 999_999},
+    )
+    assert response.status_code in (401, 403), response.text
+
+
+def test_settings_patch_404s_for_an_unknown_organization(
+    client: TestClient, platform_admin: PlatformAdmin
+) -> None:
+    headers = _platform_auth(client, platform_admin)
+    response = client.patch(
+        f"{ORGANIZATIONS}/{uuid.uuid4()}/settings", headers=headers, json={"aiSuggestionsEnabled": False}
+    )
+    assert response.status_code == 404, response.text
 
 
 def test_ai_settings_travel_with_the_logged_in_user(client: TestClient, auth, employee: User) -> None:

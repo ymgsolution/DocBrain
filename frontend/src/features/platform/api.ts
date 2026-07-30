@@ -5,6 +5,8 @@ import type {
   FirstAdminCreated,
   OrganizationCreateRequest,
   OrganizationCreated,
+  OrganizationSettings,
+  OrganizationSettingsUpdateRequest,
   OrganizationStats,
   PlatformAdminSummary,
   PlatformLoginRequest,
@@ -46,6 +48,14 @@ const platformApiClient = {
       credentials: "include",
     }).then((r) => handleResponse<T>(r));
   },
+  patch<T>(path: string, body: unknown): Promise<T> {
+    return fetch(`${PLATFORM_BFF_BASE}${path}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      credentials: "include",
+    }).then((r) => handleResponse<T>(r));
+  },
 };
 
 export const platformApi = {
@@ -81,5 +91,12 @@ export const platformApi = {
 
   createFirstAdmin(organizationId: string, payload: FirstAdminCreateRequest): Promise<FirstAdminCreated> {
     return platformApiClient.post<FirstAdminCreated>(`/organizations/${organizationId}/admins`, payload);
+  },
+
+  updateSettings(
+    organizationId: string,
+    payload: OrganizationSettingsUpdateRequest,
+  ): Promise<OrganizationSettings> {
+    return platformApiClient.patch<OrganizationSettings>(`/organizations/${organizationId}/settings`, payload);
   },
 };

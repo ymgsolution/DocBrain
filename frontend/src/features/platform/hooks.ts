@@ -4,7 +4,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { platformApi } from "./api";
-import type { FirstAdminCreateRequest, OrganizationCreateRequest, PlatformLoginRequest } from "./types";
+import type {
+  FirstAdminCreateRequest,
+  OrganizationCreateRequest,
+  OrganizationSettingsUpdateRequest,
+  PlatformLoginRequest,
+} from "./types";
 
 export const platformKeys = {
   me: ["platform", "me"] as const,
@@ -73,6 +78,25 @@ export function useCreateFirstAdmin(organizationId: string) {
     mutationFn: (payload: FirstAdminCreateRequest) => platformApi.createFirstAdmin(organizationId, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: platformKeys.organizations });
+    },
+  });
+}
+
+export function useUpdateOrganizationSettings(organizationId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: OrganizationSettingsUpdateRequest) =>
+      platformApi.updateSettings(organizationId, payload),
+    onSuccess: () => {
+      // Invalidate the list rather than patching the cache by hand: the row
+      // also carries storage figures this mutation doesn't return, and a
+      // hand-merged cache would leave those silently stale.
+      //
+      // Returned, not fire-and-forget: the mutation then stays pending until
+      // the refetch lands, so the dialog closes onto fresh data instead of
+      // racing it. Without this, reopening straight after a save showed the
+      // pre-save values.
+      return queryClient.invalidateQueries({ queryKey: platformKeys.organizations });
     },
   });
 }

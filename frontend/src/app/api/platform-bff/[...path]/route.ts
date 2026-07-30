@@ -46,3 +46,12 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
 export async function POST(request: NextRequest, { params }: RouteContext) {
   return proxyToBackend(request, (await params).path);
 }
+
+// A route handler only accepts the methods it exports — anything else is a
+// 405 from Next.js before proxyToBackend is ever reached. This one had only
+// GET and POST because the platform area had no other verbs until
+// PATCH /organizations/{id}/settings; the tenant-facing /api/bff proxy has
+// exported PATCH and DELETE since it needed them.
+export async function PATCH(request: NextRequest, { params }: RouteContext) {
+  return proxyToBackend(request, (await params).path);
+}
