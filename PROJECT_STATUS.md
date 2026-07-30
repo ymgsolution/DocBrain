@@ -8,7 +8,7 @@
 
 > **This is the single source of truth for the project.** It must be updated whenever a feature is added, modified, refactored, removed, or completed. See [Important Rules](#important-rules) at the bottom.
 
-**Last updated:** 2026-07-29 (**multi-tenancy shipped** — organizations, per-tenant isolation across every query, a platform-admin area for managing organizations, three bugs found by using it, and a model/schema alignment pass; merged to `develop` and verified live in production. Backend suite at 211 tests). Earlier the same day: Railway moved to Singapore — dashboard 7.1s → 1.85s; three infrastructure items reviewed and deferred by decision. Previously 2026-07-28: real invite-only authentication in four phases, admin user management, share-link revocation gap closed. See §13 Change Log for the full sequence.
+**Last updated:** 2026-07-30 (platform dashboard now warns when an organization has no admin yet — the half-finished state that made an organization unreachable once already). Previously 2026-07-29 (**multi-tenancy shipped** — organizations, per-tenant isolation across every query, a platform-admin area for managing organizations, three bugs found by using it, and a model/schema alignment pass; merged to `develop` and verified live in production. Backend suite at 211 tests). Earlier the same day: Railway moved to Singapore — dashboard 7.1s → 1.85s; three infrastructure items reviewed and deferred by decision. Previously 2026-07-28: real invite-only authentication in four phases, admin user management, share-link revocation gap closed. See §13 Change Log for the full sequence.
 
 ---
 
@@ -533,6 +533,8 @@ Full reasoning in [docs/MULTI-TENANT-ARCHITECTURE-REVIEW.md](docs/MULTI-TENANT-A
 - **New organizations are seeded with a working default category set** — `General` (180-day review period), `Finance` (90), `HR` (365), `Legal` (365), `Operations` (180), created in the same transaction as the organization row so a half-initialized organization is impossible.
   - Completed: 2026-07-29 (Phase C, hardened by the two bugs below)
 - **Frontend** — `/platform/login` and `/platform`, with create-organization and create-first-admin dialogs.
+- **Incomplete-setup warning** — creating an organization and creating its first admin are two separate actions, and step one *looked* finished when it wasn't: the dialog closed and the organization joined the table like any other. An organization with no users can't be signed into and can't be invited into either (invitations come from an admin, and there is none), so stopping halfway left a workspace nobody could reach — and with no delete endpoint, no way to undo it from the app. That happened for real; "Wipro Test Co" sat unusable for about two hours before being removed with SQL. Now surfaced in three places, all driven by the `userCount` the endpoint already returned (no API change): a warning banner naming the affected organizations, a `No admin` badge in the Users column instead of a bare `0`, and the row action promoted to the primary button variant and relabelled `Create admin` instead of `Add admin`. Deliberately **does not prevent** the state — the two-step flow is intentional, so an organization can still be created before deciding who runs it.
+  - Completed: 2026-07-30
   - Completed: 2026-07-29 (Phase D)
   - Notes: 14 tests in `tests/api/test_platform_admin.py`, covering the boundary between the two auth systems and the full bootstrap flow. Bootstrap admin is created by `scripts/create_platform_admin.py`.
 
@@ -1142,7 +1144,9 @@ Run via `uv run python -m scripts.seed` (idempotent, and **scoped to the demo or
 1. **Frontend tests** — still nothing at all. Verification today is `tsc` + `eslint` + a production build + driving the running app by hand. Also outstanding: the scripted demo walkthrough exercising each of the six pains from the original brief in order (§19.7).
 2. **Delete or ignore the `main` branch.** Vercel's production branch is now `develop`; `main` is now ~36 commits behind and nothing depends on it.
 3. **The multi-tenant leftovers in §4** — validate `owner_id` on document update, isolation tests for versions/tags/trash, and two maintenance scripts broken on post-multi-tenancy signatures. All small; none blocking.
-4. **No way to delete an organization.** There is no endpoint, and every tenant FK is `ON DELETE RESTRICT`, so removing one means clearing its rows in child-first order by hand (done once, for "Wipro Test Co"). Fine while organizations are created rarely and deliberately; worth building if that changes. Related: the create-organization → create-first-admin flow is two separate calls, so abandoning it halfway leaves an organization nobody can log into — which is exactly how that test organization came to exist.
+4. **No way to delete an organization.** There is no endpoint, and every tenant FK is `ON DELETE RESTRICT`, so removing one means clearing its rows in child-first order by hand (done twice now — "Wipro Test Co", and a throwaway used to verify the warning below). Fine while organizations are created rarely and deliberately; worth building if that changes — and it's the remaining half of the problem, since the app can now *warn* about a half-set-up organization but still can't remove one.
+   - ~~The two-step create-organization → create-first-admin flow silently leaves an unreachable organization if abandoned halfway.~~ **Surfaced 2026-07-30** — banner + `No admin` badge + emphasized action on the platform dashboard (see §3). The state is still *possible*, by design; it's just no longer invisible.
+5. **`create_first_admin` doesn't enforce "first".** The endpoint and its docstring both say first admin, but nothing checks whether the organization already has users — it will happily create a second or third. Harmless today (only a platform admin can call it, and creating another admin is a reasonable thing to want), but the name promises a constraint the code doesn't keep. Either rename it or add the check.
 
 Ask before starting, per standing practice.
 
@@ -1171,6 +1175,10 @@ Ask before starting, per standing practice.
 ## 13. Change Log
 
 *(Reverse chronological. Never delete history — always append.)*
+
+### 2026-07-30
+
+- **Made the half-finished organization state visible on the platform dashboard.** Creating an organization and creating its first admin are two separate actions, and the first one looked complete when it wasn't — which is how "Wipro Test Co" ended up unreachable and had to be deleted with SQL. Added a warning banner naming any organization with no users, a `No admin` badge in place of a bare `0`, and a promoted `Create admin` action on those rows. Frontend only; it reads the `userCount` the endpoint already returned, so no API change. Chosen over merging the two steps into one dialog: the two-step flow is deliberate (an organization can be created before deciding who runs it), so the gap is worth surfacing rather than closing. Verified in a real browser against live data in both light and dark themes — banner names the one incomplete organization, one badge, one emphasized action against three normal ones, no console errors — using a throwaway organization that was deleted afterwards with the other organizations' row counts confirmed unchanged.
 
 ### 2026-07-29
 
