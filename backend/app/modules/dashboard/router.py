@@ -24,7 +24,7 @@ def get_summary(
     current_user: User = Depends(get_current_user),
 ) -> DashboardSummary:
     totals, by_category, recently_added, recently_accessed, expiring_soon, pending_reviews_count = (
-        service.get_summary()
+        service.get_summary(current_user.organization_id)
     )
     return DashboardSummary(
         totals=DashboardTotals(**totals),
@@ -46,7 +46,9 @@ def get_activity(
     service: DashboardService = Depends(get_dashboard_service),
     current_user: User = Depends(get_current_user),
 ) -> PagedActivity:
-    items, total = service.list_activity(page, size, document_id=document_id)
+    items, total = service.list_activity(
+        page, size, organization_id=current_user.organization_id, document_id=document_id
+    )
     out_items = [
         ActivityEventOut(
             id=e.id,

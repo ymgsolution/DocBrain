@@ -149,7 +149,7 @@ npm run dev
 
 ### 8. Open the app
 
-Go to **http://localhost:3000**. There's no signup/password — pick any seeded persona from the login screen to sign in.
+Go to **http://localhost:3000** and sign in with one of the [demo accounts](#demo-accounts) — e.g. `anita@docbrain.dev` / `Test@123`. Accounts are invite-only, so there's no public signup form.
 
 ## Demo Flow
 
@@ -226,6 +226,20 @@ To verify the image locally before deploying:
 cd backend && docker build -t docbrain-api .
 docker run -p 8100:8100 -e PORT=8100 --env-file .env docbrain-api
 ```
+
+## Demo accounts
+
+Accounts are invite-only. The seeded demo users all share the password
+**`Test@123`** — deliberate and published, because they're demo identities
+in a portfolio project, not real accounts:
+
+| Email | Role |
+|---|---|
+| `priya@docbrain.dev` | Employee |
+| `rahul@docbrain.dev` | Reviewer |
+| `anita@docbrain.dev` | Admin |
+
+Re-apply with `uv run python -m scripts.set_demo_passwords`.
 
 ## Tests
 

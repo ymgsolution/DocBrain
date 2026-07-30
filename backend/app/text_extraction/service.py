@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from app.db.models import AiJob, DocumentVersion
+from app.db.models import AiJob, DocumentVersion, Organization
 from app.db.models.enums import AiJobType, ExtractionStatus
 from app.storage.port import StoragePort
 from app.text_extraction.registry import get_extractor
@@ -64,8 +64,35 @@ class TextExtractionService:
         # genuinely exists. GENERATE_METADATA and GENERATE_EMBEDDING are enqueued
         # side by side, independently of each other — neither depends on the
         # other's outcome or completion order (Similar Document Detection track).
+        #
+        # This is also the *only* place either job is created anywhere in the
+        # codebase, which is why the Organization Settings toggles are enforced
+        # right here rather than inside the handlers or the worker. Switching a
+        # setting off means the job row is never written at all: nothing to
+        # claim, nothing to retry, no provider call, and no cost — as opposed
+        # to enqueuing work only to skip it later. app/ai/* and app/ai_jobs/*
+        # stay entirely unaware that settings exist.
         if result.char_count > 0:
-            db.add(AiJob(job_type=AiJobType.GENERATE_METADATA, document_version_id=version.id))
-            db.add(AiJob(job_type=AiJobType.GENERATE_EMBEDDING, document_version_id=version.id))
+            organization = db.get(Organization, version.organization_id)
+            # A missing organization row is impossible (organization_id is
+            # NOT NULL with an ON DELETE RESTRICT FK), but read defensively
+            # rather than assume: enqueuing against a vanished tenant would be
+            # worse than skipping.
+            if organization is not None and organization.ai_suggestions_enabled:
+                db.add(
+                    AiJob(
+                        job_type=AiJobType.GENERATE_METADATA,
+                        document_version_id=version.id,
+                        organization_id=version.organization_id,
+                    )
+                )
+            if organization is not None and organization.duplicate_detection_enabled:
+                db.add(
+                    AiJob(
+                        job_type=AiJobType.GENERATE_EMBEDDING,
+                        document_version_id=version.id,
+                        organization_id=version.organization_id,
+                    )
+                )
 
         db.commit()

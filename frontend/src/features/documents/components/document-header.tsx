@@ -1,4 +1,4 @@
-import { ClipboardCheck, FilePlus2, Loader2, Pencil, Trash2 } from "lucide-react";
+import { ClipboardCheck, FilePlus2, Loader2, Pencil, Share2, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FileTypeIcon } from "@/components/shared/file-type-icon";
@@ -16,6 +16,7 @@ interface DocumentHeaderProps {
   onDelete: () => void;
   onMarkReviewed: () => void;
   onUploadVersion: () => void;
+  onShare: () => void;
 }
 
 export function DocumentHeader({
@@ -26,6 +27,7 @@ export function DocumentHeader({
   onDelete,
   onMarkReviewed,
   onUploadVersion,
+  onShare,
 }: DocumentHeaderProps) {
   const canEdit = document.owner.id === currentUser.id || currentUser.role === "REVIEWER" || currentUser.role === "ADMIN";
   const canDelete = document.owner.id === currentUser.id || currentUser.role === "ADMIN";
@@ -61,7 +63,7 @@ export function DocumentHeader({
                 Analyzing document…
               </Badge>
             ) : (
-              isAiSuggestionPending(document) && (
+              isAiSuggestionPending(document, currentUser.organization?.aiSuggestionsEnabled ?? false) && (
                 <Badge variant="outline" className="gap-1 font-normal">
                   <Loader2 className="size-3 animate-spin" />
                   Getting AI suggestions…
@@ -81,6 +83,12 @@ export function DocumentHeader({
               versionNumber={document.currentVersion.versionNumber}
               filename={document.currentVersion.originalFilename}
             />
+          )}
+          {canEdit && (
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={onShare}>
+              <Share2 className="size-4" />
+              Share
+            </Button>
           )}
           {canEdit && (
             <Button variant="outline" size="sm" className="gap-1.5" onClick={onUploadVersion}>

@@ -10,6 +10,7 @@ from app.modules.documents.repository import DocumentRepository
 from app.storage.checksum import sha256_of_stream
 from app.storage.factory import get_storage
 from app.storage.port import StoragePort
+from app.utils.storage_quota import validate_organization_quota
 from app.utils.file_validation import (
     sniff_mime_type,
     validate_content_matches_extension,
@@ -60,7 +61,7 @@ class DocumentService:
         review_due_date: date | None,
         current_user: User,
     ) -> Document:
-        category = self.repository.get_category(category_id)
+        category = self.repository.get_category(category_id, current_user.organization_id)
         if category is None or category.is_archived:
             raise ValidationError(
                 "That category doesn't exist or is archived.",
@@ -75,9 +76,28 @@ class DocumentService:
         validate_content_matches_extension(ext, mime_type)
 
         temp_path = self.storage.save_temp(raw)
+
+        # Size-based validation sits in its own block, before anything is
+        # written. Both checks need the real byte count, which only exists
+        # once the upload has been streamed to a temp file — a client-declared
+        # size can't be trusted. Kept out of the transaction block below
+        # because a rejection here has written no rows, so there is nothing to
+        # roll back: only the temp file needs discarding. (Rolling back
+        # regardless would also unwind whatever the caller's session was
+        # already holding, which is not this function's business.)
         try:
             size_bytes = temp_path.stat().st_size
             validate_size(size_bytes)
+            validate_organization_quota(
+                self.repository.db,
+                organization_id=current_user.organization_id,
+                incoming_bytes=size_bytes,
+            )
+        except Exception:
+            self.storage.discard(temp_path)
+            raise
+
+        try:
             with open(temp_path, "rb") as f:
                 checksum = sha256_of_stream(f)
 
@@ -86,6 +106,7 @@ class DocumentService:
                 description=description,
                 category_id=category_id,
                 owner_id=current_user.id,
+                organization_id=current_user.organization_id,
                 status=DocumentStatus.ACTIVE,
                 review_due_date=review_due_date or _default_review_date(category),
             )
@@ -95,6 +116,7 @@ class DocumentService:
             storage_path = self.storage.build_storage_path(document.id, 1, file.filename or "upload")
             version = DocumentVersion(
                 document_id=document.id,
+                organization_id=current_user.organization_id,
                 version_number=1,
                 storage_path=storage_path,
                 storage_provider=self.storage.provider_name,
@@ -108,12 +130,13 @@ class DocumentService:
             self.repository.db.flush()
             document.current_version_id = version.id
 
-            tags = self.repository.get_or_create_tags(tag_names)
+            tags = self.repository.get_or_create_tags(tag_names, current_user.organization_id)
             self.repository.add_tags(document.id, [t.id for t in tags])
 
             self.repository.db.add(
                 ActivityEvent(
                     document_id=document.id,
+                    organization_id=current_user.organization_id,
                     actor_id=current_user.id,
                     event_type=ActivityEventType.CREATED,
                     summary=f"{current_user.display_name} uploaded “{title}” (v1)",
@@ -122,7 +145,13 @@ class DocumentService:
             # AI feature track: queued here, processed out-of-band by the
             # worker — never inline, so a slow/failing extraction can't
             # affect this request's latency or success.
-            self.repository.db.add(AiJob(job_type=AiJobType.EXTRACT, document_version_id=version.id))
+            self.repository.db.add(
+                AiJob(
+                    job_type=AiJobType.EXTRACT,
+                    document_version_id=version.id,
+                    organization_id=current_user.organization_id,
+                )
+            )
 
             self.repository.db.commit()
         except Exception:
@@ -136,11 +165,20 @@ class DocumentService:
         self.repository.db.refresh(document)
         return document
 
-    def get_detail(self, document_id: uuid.UUID, *, include_deleted: bool = False) -> Document:
+    def get_detail(
+        self, document_id: uuid.UUID, organization_id: uuid.UUID, *, include_deleted: bool = False
+    ) -> Document:
+        # organization_id is the isolation boundary for this whole module: a
+        # document belonging to another organization must 404 exactly like a
+        # nonexistent one, never leak via a distinguishable error
+        # (docs/MULTI-TENANT-ARCHITECTURE-REVIEW.md, Part 6). Every other
+        # module reaches a Document only through this method or the
+        # repository calls right below it, so fixing the check here closes
+        # the gap everywhere at once.
         document = (
-            self.repository.get_any_by_id(document_id)
+            self.repository.get_any_by_id(document_id, organization_id)
             if include_deleted
-            else self.repository.get_active_by_id(document_id)
+            else self.repository.get_active_by_id(document_id, organization_id)
         )
         if document is None:
             raise NotFoundError("This document doesn't exist or was deleted.")
@@ -155,9 +193,12 @@ class DocumentService:
 
     def list_trash(self, *, current_user: User, page: int, size: int) -> tuple[list[Document], int]:
         # Same scoping as soft-delete/restore (§3.4): Admin sees every trashed
-        # document, everyone else sees only what they themselves deleted.
+        # document in their own org, everyone else sees only what they
+        # themselves deleted.
         owner_id = None if current_user.role == UserRole.ADMIN else current_user.id
-        return self.repository.list_trash(owner_id=owner_id, page=page, size=size)
+        return self.repository.list_trash(
+            organization_id=current_user.organization_id, owner_id=owner_id, page=page, size=size
+        )
 
     def update_metadata(
         self,
@@ -171,7 +212,7 @@ class DocumentService:
         review_due_date: date | None,
         owner_id: uuid.UUID | None,
     ) -> Document:
-        document = self.get_detail(document_id)
+        document = self.get_detail(document_id, current_user.organization_id)
         _assert_can_edit(document, current_user)
 
         if owner_id is not None and current_user.role not in (UserRole.REVIEWER, UserRole.ADMIN):
@@ -182,7 +223,7 @@ class DocumentService:
         if description is not None:
             document.description = description
         if category_id is not None:
-            category = self.repository.get_category(category_id)
+            category = self.repository.get_category(category_id, current_user.organization_id)
             if category is None or category.is_archived:
                 raise ValidationError(
                     "That category doesn't exist or is archived.",
@@ -192,15 +233,29 @@ class DocumentService:
         if review_due_date is not None:
             document.review_due_date = review_due_date
         if owner_id is not None:
-            document.owner_id = owner_id
+            # Resolved against the caller's organization, exactly like the
+            # category branch above. Without this the id was written straight
+            # onto the row unchecked: a user id from another tenant would
+            # transfer the document across the isolation boundary and render
+            # that person's name and email in this organization's list, and a
+            # stale id would surface as a 500 from the FK rather than a
+            # field error, since IntegrityError isn't handled.
+            new_owner = self.repository.get_assignable_owner(owner_id, current_user.organization_id)
+            if new_owner is None:
+                raise ValidationError(
+                    "That person isn't an active member of your organization.",
+                    fields=[{"field": "owner_id", "message": "Choose an active colleague."}],
+                )
+            document.owner_id = new_owner.id
         if tag_names is not None:
             self.repository.clear_tags(document.id)
-            tags = self.repository.get_or_create_tags(tag_names)
+            tags = self.repository.get_or_create_tags(tag_names, current_user.organization_id)
             self.repository.add_tags(document.id, [t.id for t in tags])
 
         self.repository.db.add(
             ActivityEvent(
                 document_id=document.id,
+                organization_id=current_user.organization_id,
                 actor_id=current_user.id,
                 event_type=ActivityEventType.METADATA_UPDATED,
                 summary=f"{current_user.display_name} updated metadata for “{document.title}”",
@@ -211,7 +266,7 @@ class DocumentService:
         return document
 
     def soft_delete(self, document_id: uuid.UUID, *, current_user: User) -> None:
-        document = self.get_detail(document_id)
+        document = self.get_detail(document_id, current_user.organization_id)
         _assert_can_delete(document, current_user)
         document.status = DocumentStatus.DELETED
         document.deleted_at = datetime.now(timezone.utc)
@@ -219,6 +274,7 @@ class DocumentService:
         self.repository.db.add(
             ActivityEvent(
                 document_id=document.id,
+                organization_id=current_user.organization_id,
                 actor_id=current_user.id,
                 event_type=ActivityEventType.DELETED,
                 summary=f"{current_user.display_name} moved “{document.title}” to Trash",
@@ -227,7 +283,7 @@ class DocumentService:
         self.repository.db.commit()
 
     def restore(self, document_id: uuid.UUID, *, current_user: User) -> Document:
-        document = self.get_detail(document_id, include_deleted=True)
+        document = self.get_detail(document_id, current_user.organization_id, include_deleted=True)
         if document.status != DocumentStatus.DELETED:
             raise ValidationError("This document isn't in Trash.")
         _assert_can_delete(document, current_user)  # same rule set as soft-delete, per §3.4
@@ -238,6 +294,7 @@ class DocumentService:
         self.repository.db.add(
             ActivityEvent(
                 document_id=document.id,
+                organization_id=current_user.organization_id,
                 actor_id=current_user.id,
                 event_type=ActivityEventType.RESTORED,
                 summary=f"{current_user.display_name} restored “{document.title}” from Trash",
@@ -250,7 +307,7 @@ class DocumentService:
     def hard_delete(self, document_id: uuid.UUID, *, current_user: User) -> None:
         if current_user.role != UserRole.ADMIN:
             raise PermissionDeniedError("Only an admin can permanently delete a document.")
-        document = self.get_detail(document_id, include_deleted=True)
+        document = self.get_detail(document_id, current_user.organization_id, include_deleted=True)
         if document.status != DocumentStatus.DELETED:
             raise ValidationError("Only documents already in Trash can be permanently deleted.")
 

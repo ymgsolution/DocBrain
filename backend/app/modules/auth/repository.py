@@ -10,8 +10,12 @@ class AuthRepository:
     def __init__(self, db: Session) -> None:
         self.db = db
 
-    def list_active_users(self) -> list[User]:
-        stmt = select(User).where(User.is_active.is_(True)).order_by(User.role, User.display_name)
+    def list_active_users(self, organization_id: uuid.UUID) -> list[User]:
+        stmt = (
+            select(User)
+            .where(User.is_active.is_(True), User.organization_id == organization_id)
+            .order_by(User.role, User.display_name)
+        )
         return list(self.db.scalars(stmt))
 
     def get_by_email(self, email: str) -> User | None:

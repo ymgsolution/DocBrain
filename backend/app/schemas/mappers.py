@@ -57,7 +57,13 @@ def to_document_summary(document: Document) -> DocumentSummary:
     )
 
 
-def _to_ai_suggestion(document: Document) -> AiSuggestion | None:
+def _to_ai_suggestion(document: Document, *, enabled: bool) -> AiSuggestion | None:
+    if not enabled:
+        # The organization has AI Suggestions switched off. Existing rows are
+        # hidden, never deleted: hiding is reversible and costs nothing, while
+        # deleting would throw away work that a model was already paid for and
+        # that reappears the moment the setting is switched back on.
+        return None
     version = document.current_version
     analysis = version.analysis if version else None
     if analysis is None or analysis.status != AiAnalysisStatus.SUCCEEDED:
@@ -70,7 +76,11 @@ def _to_ai_suggestion(document: Document) -> AiSuggestion | None:
     )
 
 
-def to_document_detail(document: Document) -> DocumentDetail:
+def to_document_detail(document: Document, *, ai_suggestions_enabled: bool) -> DocumentDetail:
+    """ai_suggestions_enabled is keyword-only with no default on purpose. A
+    default of True would mean a forgotten call site silently leaks
+    suggestions for an organization that switched them off — the failure would
+    be invisible. With no default, omitting it is a type error instead."""
     return DocumentDetail(
         id=document.id,
         title=document.title,
@@ -91,7 +101,7 @@ def to_document_detail(document: Document) -> DocumentDetail:
             if document.current_version and document.current_version.extracted_text
             else None
         ),
-        ai_suggestion=_to_ai_suggestion(document),
+        ai_suggestion=_to_ai_suggestion(document, enabled=ai_suggestions_enabled),
     )
 
 

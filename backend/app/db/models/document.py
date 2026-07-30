@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Date, DateTime, Enum, ForeignKey, Index, Integer, String, Text, func, text
 from sqlalchemy.dialects.postgresql import TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -20,6 +20,11 @@ class Document(Base):
     __tablename__ = "documents"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # NOT NULL as of the Phase 4 migration (8ebd25762f70) — every write path
+    # supplies it (docs/MULTI-TENANT-ARCHITECTURE-REVIEW.md).
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
     title: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -82,3 +87,18 @@ class Document(Base):
     # Reads through document_tags; writes go through DocumentTag rows directly
     # (so assigned_at and the tags.usage_count trigger stay correct).
     tags: Mapped[list["Tag"]] = relationship(secondary="document_tags", viewonly=True)
+
+    # Both were created with raw op.execute() in the migrations because
+    # neither shape (a GIN index, a DESC partial index) is expressible with a
+    # plain index=True on the column. Declared here purely so `alembic
+    # revision --autogenerate` can see them — without these it reads them as
+    # "removed" and emits a migration that drops the full-text search index
+    # and the Explorer's listing index.
+    __table_args__ = (
+        Index("ix_documents_search_vector", "search_vector", postgresql_using="gin"),
+        Index(
+            "ix_documents_active_updated_at",
+            text("updated_at DESC"),
+            postgresql_where=text("status = 'ACTIVE'::document_status"),
+        ),
+    )

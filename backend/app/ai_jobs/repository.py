@@ -17,11 +17,11 @@ class AiJobRepository:
     def __init__(self, db: Session) -> None:
         self.db = db
 
-    def enqueue(self, *, job_type: AiJobType, document_version_id: uuid.UUID) -> AiJob:
+    def enqueue(self, *, job_type: AiJobType, document_version_id: uuid.UUID, organization_id: uuid.UUID) -> AiJob:
         """Caller is expected to insert this in the same transaction as the
         upload/version-create it's reacting to (mirrors how ActivityEvent
         rows are already written) — no separate commit here."""
-        job = AiJob(job_type=job_type, document_version_id=document_version_id)
+        job = AiJob(job_type=job_type, document_version_id=document_version_id, organization_id=organization_id)
         self.db.add(job)
         return job
 

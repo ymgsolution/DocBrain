@@ -32,7 +32,13 @@ def list_pending_reviews(
     service: ReviewsService = Depends(get_reviews_service),
     current_user: User = Depends(require_role(UserRole.REVIEWER, UserRole.ADMIN)),
 ) -> PagedPendingReviews:
-    items, total = service.list_pending(category_id=category_id, owner_id=owner_id, page=page, size=size)
+    items, total = service.list_pending(
+        organization_id=current_user.organization_id,
+        category_id=category_id,
+        owner_id=owner_id,
+        page=page,
+        size=size,
+    )
     today = datetime.now(timezone.utc).date()
 
     out_items = []
@@ -67,4 +73,4 @@ def mark_reviewed(
     current_user: User = Depends(require_role(UserRole.REVIEWER, UserRole.ADMIN)),
 ) -> DocumentDetail:
     document = service.mark_reviewed(document_id, note=payload.note, current_user=current_user)
-    return to_document_detail(document)
+    return to_document_detail(document, ai_suggestions_enabled=current_user.organization.ai_suggestions_enabled)

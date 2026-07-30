@@ -29,11 +29,11 @@ class AiDocumentAnalysisRepository:
         analysis.accepted_at = datetime.now(timezone.utc)
         self.db.commit()
 
-    def get_or_create(self, document_version_id: uuid.UUID) -> AiDocumentAnalysis:
+    def get_or_create(self, document_version_id: uuid.UUID, organization_id: uuid.UUID) -> AiDocumentAnalysis:
         existing = self.get_by_version_id(document_version_id)
         if existing is not None:
             return existing
-        row = AiDocumentAnalysis(document_version_id=document_version_id)
+        row = AiDocumentAnalysis(document_version_id=document_version_id, organization_id=organization_id)
         self.db.add(row)
         self.db.flush()
         return row

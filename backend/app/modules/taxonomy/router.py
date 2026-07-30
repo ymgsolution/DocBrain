@@ -44,7 +44,12 @@ def list_categories(
     service: TaxonomyService = Depends(get_taxonomy_service),
     current_user: User = Depends(get_current_user),
 ) -> list[CategoryOut]:
-    return [_to_category_out(c, count) for c, count in service.list_categories(include_archived=include_archived)]
+    return [
+        _to_category_out(c, count)
+        for c, count in service.list_categories(
+            organization_id=current_user.organization_id, include_archived=include_archived
+        )
+    ]
 
 
 @router.post("/categories", response_model=CategoryOut, status_code=201)
@@ -54,6 +59,7 @@ def create_category(
     current_user: User = Depends(require_role(UserRole.ADMIN)),
 ) -> CategoryOut:
     category = service.create_category(
+        organization_id=current_user.organization_id,
         name=payload.name,
         description=payload.description,
         default_review_period_days=payload.default_review_period_days,
@@ -70,6 +76,7 @@ def update_category(
 ) -> CategoryOut:
     category = service.update_category(
         category_id,
+        organization_id=current_user.organization_id,
         name=payload.name,
         description=payload.description,
         default_review_period_days=payload.default_review_period_days,
@@ -85,7 +92,7 @@ def delete_category(
     service: TaxonomyService = Depends(get_taxonomy_service),
     current_user: User = Depends(require_role(UserRole.ADMIN)),
 ) -> None:
-    service.delete_category(category_id)
+    service.delete_category(category_id, current_user.organization_id)
 
 
 @router.get("/tags", response_model=list[TagOut])
@@ -95,7 +102,10 @@ def list_tags(
     service: TaxonomyService = Depends(get_taxonomy_service),
     current_user: User = Depends(get_current_user),
 ) -> list[TagOut]:
-    return [TagOut.model_validate(t, from_attributes=True) for t in service.list_tags(q=q, limit=limit)]
+    return [
+        TagOut.model_validate(t, from_attributes=True)
+        for t in service.list_tags(organization_id=current_user.organization_id, q=q, limit=limit)
+    ]
 
 
 @router.patch("/tags/{tag_id}", response_model=TagOut)
@@ -105,7 +115,7 @@ def rename_tag(
     service: TaxonomyService = Depends(get_taxonomy_service),
     current_user: User = Depends(require_role(UserRole.ADMIN)),
 ) -> TagOut:
-    tag = service.rename_tag(tag_id, name=payload.name)
+    tag = service.rename_tag(tag_id, organization_id=current_user.organization_id, name=payload.name)
     return TagOut.model_validate(tag, from_attributes=True)
 
 
@@ -116,7 +126,9 @@ def merge_tag(
     service: TaxonomyService = Depends(get_taxonomy_service),
     current_user: User = Depends(require_role(UserRole.ADMIN)),
 ) -> TagMergeResponse:
-    count = service.merge_tag(tag_id, target_tag_id=payload.target_tag_id)
+    count = service.merge_tag(
+        tag_id, target_tag_id=payload.target_tag_id, organization_id=current_user.organization_id
+    )
     return TagMergeResponse(documents_updated=count)
 
 
@@ -126,4 +138,4 @@ def delete_tag(
     service: TaxonomyService = Depends(get_taxonomy_service),
     current_user: User = Depends(require_role(UserRole.ADMIN)),
 ) -> None:
-    service.delete_tag(tag_id)
+    service.delete_tag(tag_id, current_user.organization_id)

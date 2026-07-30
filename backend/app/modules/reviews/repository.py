@@ -14,6 +14,7 @@ class ReviewsRepository:
     def list_pending(
         self,
         *,
+        organization_id: uuid.UUID,
         category_id: uuid.UUID | None,
         owner_id: uuid.UUID | None,
         horizon_days: int,
@@ -27,6 +28,7 @@ class ReviewsRepository:
                 Document.status == DocumentStatus.ACTIVE,
                 Document.review_due_date.is_not(None),
                 Document.review_due_date <= func.current_date() + horizon_days,
+                Document.organization_id == organization_id,
             )
             .order_by(Document.review_due_date.asc())
         )

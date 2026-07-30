@@ -28,7 +28,9 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.models import Category, User
+from app.core.passwords import hash_password
 from app.db.models.enums import UserRole
+from app.db.models.organization import DEFAULT_ORGANIZATION_ID
 from app.main import app
 from app.modules.documents.repository import DocumentRepository
 from app.modules.documents.router import get_document_service
@@ -36,8 +38,14 @@ from app.modules.documents.service import DocumentService
 from app.modules.versions.repository import VersionRepository
 from app.modules.versions.router import get_document_service as get_document_service_for_versions
 from app.modules.versions.router import get_version_service
+from app.modules.shares.repository import ShareLinkRepository
+from app.modules.shares.router import get_share_service
+from app.modules.shares.service import ShareService
 from app.modules.versions.service import VersionService
+from app.email.factory import get_email_sender
+from app.email.port import EmailSender
 from app.storage.local_adapter import LocalFileSystemStorage
+from tests.constants import TEST_PASSWORD
 
 # The app's own logging config sets INFO, which makes httpx narrate every
 # single test request. Tests are noisy enough without it.
@@ -72,8 +80,27 @@ def storage(tmp_path) -> LocalFileSystemStorage:
     return LocalFileSystemStorage(root=str(tmp_path))
 
 
+class FakeEmailSender:
+    """Captures instead of sending. Without this the suite would make a real
+    Resend API call for every invitation it creates — slow, wasteful, and
+    dependent on a network and a live key to pass."""
+
+    def __init__(self) -> None:
+        self.sent: list[dict[str, str]] = []
+
+    def send(self, *, to: str, subject: str, html: str, text: str) -> None:
+        self.sent.append({"to": to, "subject": subject, "html": html, "text": text})
+
+
 @pytest.fixture
-def client(db_session: Session, storage: LocalFileSystemStorage) -> Iterator[TestClient]:
+def emails() -> FakeEmailSender:
+    return FakeEmailSender()
+
+
+@pytest.fixture
+def client(
+    db_session: Session, storage: LocalFileSystemStorage, emails: FakeEmailSender
+) -> Iterator[TestClient]:
     from app.db.session import get_db_session
 
     def _session_override() -> Session:
@@ -85,12 +112,21 @@ def client(db_session: Session, storage: LocalFileSystemStorage) -> Iterator[Tes
     def _version_service() -> VersionService:
         return VersionService(VersionRepository(db_session), storage)
 
+    def _share_service() -> ShareService:
+        return ShareService(ShareLinkRepository(db_session), DocumentRepository(db_session), storage)
+
     app.dependency_overrides[get_db_session] = _session_override
     # documents/ and versions/ each define their own get_document_service;
     # dependency_overrides keys on the function object, so both need one.
     app.dependency_overrides[get_document_service] = _document_service
     app.dependency_overrides[get_document_service_for_versions] = _document_service
     app.dependency_overrides[get_version_service] = _version_service
+    app.dependency_overrides[get_share_service] = _share_service
+
+    def _email_sender() -> EmailSender:
+        return emails
+
+    app.dependency_overrides[get_email_sender] = _email_sender
     try:
         yield TestClient(app)
     finally:
@@ -103,13 +139,15 @@ def make_user(db_session: Session):
     fixture so a test needing a *second* employee (permission checks) can
     ask for one without a near-duplicate fixture per role."""
 
-    def _make(role: UserRole) -> User:
+    def _make(role: UserRole, *, organization_id: uuid.UUID = DEFAULT_ORGANIZATION_ID) -> User:
         suffix = uuid.uuid4().hex[:8]
         user = User(
             email=f"{role.value.lower()}-{suffix}@test.docbrain",
             display_name=f"Test {role.value.title()} {suffix}",
             role=role,
+            organization_id=organization_id,
             is_active=True,
+            password_hash=hash_password(TEST_PASSWORD),
         )
         db_session.add(user)
         db_session.flush()
@@ -148,7 +186,11 @@ def today() -> date:
 @pytest.fixture
 def category(db_session: Session) -> Category:
     suffix = uuid.uuid4().hex[:8]
-    row = Category(name=f"Test Category {suffix}", slug=f"test-category-{suffix}")
+    row = Category(
+        name=f"Test Category {suffix}",
+        slug=f"test-category-{suffix}",
+        organization_id=DEFAULT_ORGANIZATION_ID,
+    )
     db_session.add(row)
     db_session.flush()
     return row
@@ -160,7 +202,9 @@ def auth(client: TestClient):
     verified on every subsequent request) rather than forging a header."""
 
     def _headers(user: User) -> dict[str, str]:
-        response = client.post("/api/v1/auth/login", json={"email": user.email})
+        response = client.post(
+            "/api/v1/auth/login", json={"email": user.email, "password": TEST_PASSWORD}
+        )
         assert response.status_code == 200, response.text
         return {"Authorization": f"Bearer {response.json()['token']}"}
 

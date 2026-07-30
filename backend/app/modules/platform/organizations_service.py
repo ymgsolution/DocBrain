@@ -1,0 +1,144 @@
+import uuid
+
+from app.core.exceptions import ConflictError, NotFoundError, ValidationError
+from app.core.passwords import MIN_PASSWORD_LENGTH, hash_password
+from app.db.models import Category, Organization, User
+from app.db.models.enums import UserRole
+from app.modules.auth.repository import AuthRepository
+from app.modules.platform.organizations_repository import OrganizationsRepository
+from app.utils.slugify import slugify
+
+# A brand new organization needs at least one category to be upload-ready —
+# category_id is required on every document, so zero categories silently
+# blocks the very first upload (docs/ORGANIZATION-MIGRATION-BUG-INVESTIGATION.md).
+# A generic starter set, not a copy of any specific org's taxonomy — that
+# org's own admin can rename, delete, or add to these immediately, exactly
+# as freely as Accenture's admin manages its 13 categories today.
+#
+# Each one also gets a default_review_period_days, mirroring the mix already
+# used by the pre-existing seed categories (scripts/seed.py's CATEGORIES).
+# Without it, ReviewsService.mark_reviewed has no period to compute a new
+# review_due_date from and intentionally leaves the due date untouched (see
+# its docstring) — correct behavior for a category that genuinely has no
+# configured cadence, but not what a *default* starter category should do,
+# since it silently made "mark as reviewed" look like it did nothing.
+DEFAULT_CATEGORIES = [
+    ("General", 180),
+    ("Finance", 90),
+    ("HR", 365),
+    ("Legal", 365),
+    ("Operations", 180),
+]
+
+
+class OrganizationsService:
+    def __init__(self, repository: OrganizationsRepository, users: AuthRepository) -> None:
+        self.repository = repository
+        self.users = users
+
+    def list_organizations(self) -> list[tuple[Organization, int, int, int, int, int, int]]:
+        return self.repository.list_with_stats()
+
+    def update_settings(
+        self,
+        organization_id: uuid.UUID,
+        *,
+        ai_suggestions_enabled: bool | None,
+        duplicate_detection_enabled: bool | None,
+        storage_limit_mb: int | None,
+    ) -> Organization:
+        """Partial update — None means "leave this one alone", so changing a
+        single toggle doesn't require the caller to restate the other two and
+        can't accidentally clobber a value it never intended to touch.
+
+        Deliberately permits a limit below the organization's current usage.
+        Blocking that would be the wrong call: an organization that has
+        already overrun is exactly the one an operator most needs to be able
+        to cap, and the effect is only that further uploads are refused until
+        space is freed — nothing existing is deleted or hidden. The settings
+        screen surfaces the over-limit state so it's a visible choice rather
+        than a silent one.
+        """
+        organization = self.repository.get_by_id(organization_id)
+        if organization is None:
+            raise NotFoundError("This organization doesn't exist.")
+
+        if ai_suggestions_enabled is not None:
+            organization.ai_suggestions_enabled = ai_suggestions_enabled
+        if duplicate_detection_enabled is not None:
+            organization.duplicate_detection_enabled = duplicate_detection_enabled
+        if storage_limit_mb is not None:
+            organization.storage_limit_mb = storage_limit_mb
+
+        self.repository.db.commit()
+        self.repository.db.refresh(organization)
+        return organization
+
+    def _unique_slug(self, base: str) -> str:
+        base_slug = slugify(base)
+        candidate = base_slug
+        i = 2
+        while self.repository.get_by_slug(candidate) is not None:
+            candidate = f"{base_slug}-{i}"
+            i += 1
+        return candidate
+
+    def create_organization(self, *, name: str) -> Organization:
+        organization = Organization(name=name.strip(), slug=self._unique_slug(name))
+        self.repository.add(organization)
+        self.repository.db.flush()  # allocate organization.id for the categories below
+
+        # Slugs only need to be unique per organization, and this is the
+        # first row for this one — no collision to check for, unlike
+        # TaxonomyService._unique_slug which handles a caller picking a name
+        # that already exists in an established org's taxonomy.
+        for category_name, period_days in DEFAULT_CATEGORIES:
+            self.repository.db.add(
+                Category(
+                    organization_id=organization.id,
+                    name=category_name,
+                    slug=slugify(category_name),
+                    default_review_period_days=period_days,
+                )
+            )
+
+        self.repository.db.commit()
+        self.repository.db.refresh(organization)
+        return organization
+
+    def create_first_admin(
+        self, organization_id: uuid.UUID, *, email: str, display_name: str, password: str
+    ) -> User:
+        """The one bootstrap exception to "admins invite people" — a brand
+        new organization has no admin yet to send that invite, so a
+        platform admin creates the first one directly rather than going
+        through the normal Invitation flow. Everyone after this one *does*
+        go through that flow, started by this new admin."""
+        organization = self.repository.get_by_id(organization_id)
+        if organization is None:
+            raise NotFoundError("This organization doesn't exist.")
+
+        normalised = email.strip().lower()
+        if self.users.get_by_email(normalised) is not None:
+            raise ConflictError(
+                "Someone already has an account with that email.",
+                fields=[{"field": "email", "message": "This email already has an account."}],
+            )
+        if len(password) < MIN_PASSWORD_LENGTH:
+            raise ValidationError(
+                f"Choose a password of at least {MIN_PASSWORD_LENGTH} characters.",
+                fields=[{"field": "password", "message": f"At least {MIN_PASSWORD_LENGTH} characters."}],
+            )
+
+        admin = User(
+            email=normalised,
+            display_name=display_name.strip(),
+            role=UserRole.ADMIN,
+            organization_id=organization.id,
+            is_active=True,
+            password_hash=hash_password(password),
+        )
+        self.repository.db.add(admin)
+        self.repository.db.commit()
+        self.repository.db.refresh(admin)
+        return admin

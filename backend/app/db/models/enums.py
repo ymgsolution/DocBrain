@@ -20,6 +20,7 @@ class ActivityEventType(str, enum.Enum):
     REVIEWED = "REVIEWED"
     DELETED = "DELETED"
     RESTORED = "RESTORED"
+    SHARED = "SHARED"
 
 
 class ThemePreference(str, enum.Enum):

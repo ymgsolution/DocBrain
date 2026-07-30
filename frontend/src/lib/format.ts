@@ -72,11 +72,22 @@ export function isExtractionPending(document: {
 // there's a gap where extractionStatus is already SUCCEEDED but the AI
 // suggestion job hasn't completed yet. Keep polling through that gap too,
 // same timeout window, keyed off the same upload timestamp.
-export function isAiSuggestionPending(document: {
-  extractionStatus: ExtractionStatus;
-  aiSuggestion: unknown;
-  currentVersion: { uploadedAt: string } | null;
-}): boolean {
+export function isAiSuggestionPending(
+  document: {
+    extractionStatus: ExtractionStatus;
+    aiSuggestion: unknown;
+    currentVersion: { uploadedAt: string } | null;
+  },
+  // Whether this organization has AI Suggestions switched on. Required, not
+  // optional: a null aiSuggestion means either "the worker hasn't finished
+  // yet" or "suggestions are switched off", and those are indistinguishable
+  // from the document payload alone. Without this the function answers "yes,
+  // still coming" for an organization where nothing is coming — polling every
+  // 2s and showing "Getting AI suggestions…" for two full minutes after every
+  // upload. Comes from useCurrentUser().organization.
+  aiSuggestionsEnabled: boolean,
+): boolean {
+  if (!aiSuggestionsEnabled) return false;
   if (document.extractionStatus !== "SUCCEEDED" || document.aiSuggestion || !document.currentVersion) return false;
   const elapsed = Date.now() - new Date(document.currentVersion.uploadedAt).getTime();
   return elapsed < EXTRACTION_TIMEOUT_MS;

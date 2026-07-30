@@ -12,31 +12,39 @@ class TaxonomyService:
 
     # --- categories ---
 
-    def list_categories(self, *, include_archived: bool) -> list[tuple[Category, int]]:
-        return self.repository.list_categories(include_archived=include_archived)
+    def list_categories(self, *, organization_id: uuid.UUID, include_archived: bool) -> list[tuple[Category, int]]:
+        return self.repository.list_categories(organization_id=organization_id, include_archived=include_archived)
 
-    def _unique_slug(self, base: str, *, exclude_category_id: uuid.UUID | None = None) -> str:
+    def _unique_slug(
+        self, base: str, *, organization_id: uuid.UUID, exclude_category_id: uuid.UUID | None = None
+    ) -> str:
         base_slug = slugify(base)
         candidate = base_slug
         i = 2
         while True:
-            existing = self.repository.get_category_by_slug(candidate)
+            existing = self.repository.get_category_by_slug(candidate, organization_id)
             if existing is None or existing.id == exclude_category_id:
                 return candidate
             candidate = f"{base_slug}-{i}"
             i += 1
 
     def create_category(
-        self, *, name: str, description: str | None, default_review_period_days: int | None
+        self,
+        *,
+        organization_id: uuid.UUID,
+        name: str,
+        description: str | None,
+        default_review_period_days: int | None,
     ) -> Category:
-        if self.repository.get_category_by_name_ci(name) is not None:
+        if self.repository.get_category_by_name_ci(name, organization_id) is not None:
             raise ConflictError(
                 "A category with that name already exists.",
                 fields=[{"field": "name", "message": "Name must be unique (case-insensitive)."}],
             )
         category = Category(
+            organization_id=organization_id,
             name=name.strip(),
-            slug=self._unique_slug(name),
+            slug=self._unique_slug(name, organization_id=organization_id),
             description=description,
             default_review_period_days=default_review_period_days,
         )
@@ -49,24 +57,25 @@ class TaxonomyService:
         self,
         category_id: uuid.UUID,
         *,
+        organization_id: uuid.UUID,
         name: str | None,
         description: str | None,
         default_review_period_days: int | None,
         is_archived: bool | None,
     ) -> Category:
-        category = self.repository.get_category(category_id)
+        category = self.repository.get_category(category_id, organization_id)
         if category is None:
             raise NotFoundError("This category doesn't exist.")
 
         if name is not None and name.strip().lower() != category.name.lower():
-            existing = self.repository.get_category_by_name_ci(name)
+            existing = self.repository.get_category_by_name_ci(name, organization_id)
             if existing is not None and existing.id != category.id:
                 raise ConflictError(
                     "A category with that name already exists.",
                     fields=[{"field": "name", "message": "Name must be unique (case-insensitive)."}],
                 )
             category.name = name.strip()
-            category.slug = self._unique_slug(name, exclude_category_id=category.id)
+            category.slug = self._unique_slug(name, organization_id=organization_id, exclude_category_id=category.id)
 
         if description is not None:
             category.description = description
@@ -79,8 +88,8 @@ class TaxonomyService:
         self.repository.db.refresh(category)
         return category
 
-    def delete_category(self, category_id: uuid.UUID) -> None:
-        category = self.repository.get_category(category_id)
+    def delete_category(self, category_id: uuid.UUID, organization_id: uuid.UUID) -> None:
+        category = self.repository.get_category(category_id, organization_id)
         if category is None:
             raise NotFoundError("This category doesn't exist.")
         usage = self.repository.get_category_document_count(category_id)
@@ -94,15 +103,15 @@ class TaxonomyService:
 
     # --- tags ---
 
-    def list_tags(self, *, q: str | None, limit: int) -> list[Tag]:
-        return self.repository.list_tags(q=q, limit=limit)
+    def list_tags(self, *, organization_id: uuid.UUID, q: str | None, limit: int) -> list[Tag]:
+        return self.repository.list_tags(organization_id=organization_id, q=q, limit=limit)
 
-    def rename_tag(self, tag_id: uuid.UUID, *, name: str) -> Tag:
-        tag = self.repository.get_tag(tag_id)
+    def rename_tag(self, tag_id: uuid.UUID, *, organization_id: uuid.UUID, name: str) -> Tag:
+        tag = self.repository.get_tag(tag_id, organization_id)
         if tag is None:
             raise NotFoundError("This tag doesn't exist.")
         normalized = name.strip().lower()
-        existing = self.repository.get_tag_by_normalized_name(normalized)
+        existing = self.repository.get_tag_by_normalized_name(normalized, organization_id)
         if existing is not None and existing.id != tag.id:
             raise ConflictError(
                 f"A tag named “{existing.name}” already exists — merge into it instead of renaming.",
@@ -114,11 +123,11 @@ class TaxonomyService:
         self.repository.db.refresh(tag)
         return tag
 
-    def merge_tag(self, source_tag_id: uuid.UUID, *, target_tag_id: uuid.UUID) -> int:
+    def merge_tag(self, source_tag_id: uuid.UUID, *, target_tag_id: uuid.UUID, organization_id: uuid.UUID) -> int:
         if source_tag_id == target_tag_id:
             raise ValidationError("Can't merge a tag into itself.")
-        source = self.repository.get_tag(source_tag_id)
-        target = self.repository.get_tag(target_tag_id)
+        source = self.repository.get_tag(source_tag_id, organization_id)
+        target = self.repository.get_tag(target_tag_id, organization_id)
         if source is None or target is None:
             raise NotFoundError("One of these tags doesn't exist.")
 
@@ -140,8 +149,8 @@ class TaxonomyService:
         self.repository.db.commit()
         return updated_count
 
-    def delete_tag(self, tag_id: uuid.UUID) -> None:
-        tag = self.repository.get_tag(tag_id)
+    def delete_tag(self, tag_id: uuid.UUID, organization_id: uuid.UUID) -> None:
+        tag = self.repository.get_tag(tag_id, organization_id)
         if tag is None:
             raise NotFoundError("This tag doesn't exist.")
         if tag.usage_count > 0:

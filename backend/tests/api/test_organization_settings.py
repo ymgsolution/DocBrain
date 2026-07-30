@@ -1,0 +1,625 @@
+"""Organization Settings — Phases 1 to 3. The data exists, a platform admin
+can change it, and the two AI toggles now actually gate work. The storage
+limit is still inert; that lands in Phase 4.
+
+Several things are worth proving here rather than assuming.
+
+First, that a new organization gets working settings *without anyone having
+to create them*. These are NOT NULL columns with a server_default precisely
+so there is no "settings row" to forget, and this project has already shipped
+three bugs of the opposite shape (a new organization with no categories, then
+categories with no review period, then AI rows with no organization_id).
+
+Second, that storage usage counts what it claims to count: every version's
+bytes, including superseded versions and documents sitting in Trash. Those
+files really are still on disk — soft delete only flips Document.status, and
+only a permanent delete removes them — so a number that quietly excluded them
+would disagree with the disk.
+
+Third, that switching an AI toggle off stops the work being *created*, not
+merely hidden. The gating tests below assert on `ai_jobs` rows rather than on
+the API response, because "no card rendered" would also pass if the job ran,
+cost money and was then quietly discarded — which is the failure this design
+exists to avoid.
+"""
+
+import io
+import uuid
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import select, text
+from sqlalchemy.orm import Session
+
+from app.core.passwords import hash_password
+from app.db.models import AiDocumentAnalysis, AiJob, Category, Document, Organization, PlatformAdmin, User
+from app.db.models.enums import AiAnalysisStatus, AiJobType
+from app.db.models.organization import (
+    DEFAULT_AI_SUGGESTIONS_ENABLED,
+    DEFAULT_DUPLICATE_DETECTION_ENABLED,
+    DEFAULT_STORAGE_LIMIT_MB,
+)
+from app.modules.documents.repository import DocumentRepository
+from app.text_extraction.service import TextExtractionService
+
+ORGANIZATIONS = "/api/v1/platform/organizations"
+PLATFORM_PASSWORD = "PlatformPass123"
+
+
+@pytest.fixture
+def platform_admin(db_session: Session) -> PlatformAdmin:
+    admin = PlatformAdmin(
+        email=f"settings-{uuid.uuid4().hex[:8]}@platform.docbrain",
+        display_name="Settings Platform Admin",
+        password_hash=hash_password(PLATFORM_PASSWORD),
+        is_active=True,
+    )
+    db_session.add(admin)
+    db_session.flush()
+    return admin
+
+
+def _platform_auth(client: TestClient, admin: PlatformAdmin) -> dict[str, str]:
+    response = client.post(
+        "/api/v1/platform/auth/login", json={"email": admin.email, "password": PLATFORM_PASSWORD}
+    )
+    assert response.status_code == 200, response.text
+    return {"Authorization": f"Bearer {response.json()['token']}"}
+
+
+def test_new_organization_gets_working_settings_without_anyone_creating_them(
+    client: TestClient, platform_admin: PlatformAdmin
+) -> None:
+    headers = _platform_auth(client, platform_admin)
+    created = client.post(ORGANIZATIONS, headers=headers, json={"name": f"Org {uuid.uuid4().hex[:8]}"})
+    assert created.status_code == 201, created.text
+
+    listed = client.get(ORGANIZATIONS, headers=headers).json()
+    organization = next(o for o in listed if o["id"] == created.json()["id"])
+
+    assert organization["settings"]["aiSuggestionsEnabled"] is DEFAULT_AI_SUGGESTIONS_ENABLED
+    assert organization["settings"]["duplicateDetectionEnabled"] is DEFAULT_DUPLICATE_DETECTION_ENABLED
+    assert organization["settings"]["storageLimitMb"] == DEFAULT_STORAGE_LIMIT_MB
+    # Brand new organization, so nothing stored yet — and 0, never null.
+    assert organization["storage"]["totalBytes"] == 0
+
+
+def test_storage_usage_counts_every_version_not_just_the_current_one(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session
+) -> None:
+    """Version history is append-only and every version's file stays on disk,
+    so a second version must add to usage rather than replace the first."""
+    repository = DocumentRepository(db_session)
+    before = repository.storage_used_bytes(employee.organization_id)
+
+    v1 = b"first version contents"
+    upload = client.post(
+        "/api/v1/documents",
+        headers=auth(employee),
+        data={"title": "Versioned", "categoryId": str(category.id)},
+        files={"file": ("doc.txt", io.BytesIO(v1), "text/plain")},
+    )
+    assert upload.status_code == 201, upload.text
+    document_id = upload.json()["id"]
+    after_v1 = repository.storage_used_bytes(employee.organization_id)
+    assert after_v1 == before + len(v1)
+
+    v2 = b"second version contents, longer than the first"
+    new_version = client.post(
+        f"/api/v1/documents/{document_id}/versions",
+        headers=auth(employee),
+        data={"changeNote": "second revision"},
+        files={"file": ("doc.txt", io.BytesIO(v2), "text/plain")},
+    )
+    assert new_version.status_code == 201, new_version.text
+
+    # Both versions counted — not just the current one.
+    assert repository.storage_used_bytes(employee.organization_id) == before + len(v1) + len(v2)
+
+
+def test_storage_usage_still_counts_documents_in_trash(
+    client: TestClient, auth, admin: User, category: Category, db_session: Session
+) -> None:
+    """Soft delete flips Document.status but leaves the file on disk, so the
+    bytes must keep counting. Only a permanent delete frees space — the
+    behaviour the Trash screen has to explain to users.
+
+    Uses an admin rather than an employee because permanent delete is
+    admin-only, and this test needs to reach that final step to prove the
+    bytes are released.
+    """
+    repository = DocumentRepository(db_session)
+    before = repository.storage_used_bytes(admin.organization_id)
+
+    content = b"this document is going to the trash"
+    upload = client.post(
+        "/api/v1/documents",
+        headers=auth(admin),
+        data={"title": "Doomed", "categoryId": str(category.id)},
+        files={"file": ("doomed.txt", io.BytesIO(content), "text/plain")},
+    )
+    assert upload.status_code == 201, upload.text
+    document_id = upload.json()["id"]
+    assert repository.storage_used_bytes(admin.organization_id) == before + len(content)
+
+    trashed = client.delete(f"/api/v1/documents/{document_id}", headers=auth(admin))
+    assert trashed.status_code == 204, trashed.text
+
+    # Still counted: the file is untouched, the row is merely marked DELETED.
+    assert repository.storage_used_bytes(admin.organization_id) == before + len(content)
+
+    purged = client.delete(f"/api/v1/documents/{document_id}/permanent", headers=auth(admin))
+    assert purged.status_code == 204, purged.text
+
+    # Now the bytes are genuinely gone.
+    assert repository.storage_used_bytes(admin.organization_id) == before
+
+
+def test_storage_usage_is_per_organization(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session
+) -> None:
+    """One organization's uploads must never count against another's limit.
+
+    The second organization is inserted with raw SQL rather than through the
+    platform endpoint, matching test_multi_tenant_isolation.py — it only
+    needs to exist as a row to be summed against.
+    """
+    repository = DocumentRepository(db_session)
+    other_org_id = uuid.uuid4()
+    db_session.execute(
+        text("INSERT INTO organizations (id, name, slug) VALUES (:id, :name, :slug)"),
+        {"id": other_org_id, "name": "Other Org", "slug": f"other-{other_org_id.hex[:8]}"},
+    )
+    db_session.flush()
+
+    before_other = repository.storage_used_bytes(other_org_id)
+    upload = client.post(
+        "/api/v1/documents",
+        headers=auth(employee),
+        data={"title": "Mine", "categoryId": str(category.id)},
+        files={"file": ("mine.txt", io.BytesIO(b"some bytes here"), "text/plain")},
+    )
+    assert upload.status_code == 201, upload.text
+
+    assert repository.storage_used_bytes(other_org_id) == before_other
+
+
+def test_storage_breakdown_parts_always_sum_to_the_total(
+    client: TestClient, auth, admin: User, category: Category, platform_admin: PlatformAdmin
+) -> None:
+    """The three parts partition every version exactly once, so they must add
+    up. Built here from a document that lands in all three buckets at once:
+    two versions (one current, one superseded) plus a second document sitting
+    in Trash."""
+    live = client.post(
+        "/api/v1/documents",
+        headers=auth(admin),
+        data={"title": "Kept", "categoryId": str(category.id)},
+        files={"file": ("kept.txt", io.BytesIO(b"v1 of the kept document"), "text/plain")},
+    )
+    assert live.status_code == 201, live.text
+    superseded = client.post(
+        f"/api/v1/documents/{live.json()['id']}/versions",
+        headers=auth(admin),
+        data={"changeNote": "second revision"},
+        files={"file": ("kept.txt", io.BytesIO(b"v2 of the kept document, longer"), "text/plain")},
+    )
+    assert superseded.status_code == 201, superseded.text
+
+    doomed = client.post(
+        "/api/v1/documents",
+        headers=auth(admin),
+        data={"title": "Trashed", "categoryId": str(category.id)},
+        files={"file": ("trashed.txt", io.BytesIO(b"headed for the trash"), "text/plain")},
+    )
+    assert doomed.status_code == 201, doomed.text
+    assert client.delete(f"/api/v1/documents/{doomed.json()['id']}", headers=auth(admin)).status_code == 204
+
+    headers = _platform_auth(client, platform_admin)
+    listed = client.get(ORGANIZATIONS, headers=headers).json()
+    organization = next(o for o in listed if o["id"] == str(admin.organization_id))
+    storage = organization["storage"]
+
+    assert (
+        storage["activeCurrentBytes"] + storage["supersededBytes"] + storage["trashedBytes"]
+        == storage["totalBytes"]
+    )
+    # All three buckets are genuinely populated, so this isn't passing by
+    # everything being zero.
+    assert storage["activeCurrentBytes"] > 0
+    assert storage["supersededBytes"] > 0
+    assert storage["trashedBytes"] > 0
+
+
+def test_platform_admin_can_change_each_setting_independently(
+    client: TestClient, platform_admin: PlatformAdmin
+) -> None:
+    headers = _platform_auth(client, platform_admin)
+    org_id = client.post(ORGANIZATIONS, headers=headers, json={"name": f"Org {uuid.uuid4().hex[:8]}"}).json()["id"]
+    settings_url = f"{ORGANIZATIONS}/{org_id}/settings"
+
+    turned_off = client.patch(settings_url, headers=headers, json={"aiSuggestionsEnabled": False})
+    assert turned_off.status_code == 200, turned_off.text
+    body = turned_off.json()
+    assert body["aiSuggestionsEnabled"] is False
+    # Omitted fields are untouched, not reset — the whole point of PATCH here.
+    assert body["duplicateDetectionEnabled"] is True
+    assert body["storageLimitMb"] == DEFAULT_STORAGE_LIMIT_MB
+
+    resized = client.patch(settings_url, headers=headers, json={"storageLimitMb": 500})
+    assert resized.status_code == 200, resized.text
+    assert resized.json()["storageLimitMb"] == 500
+    # ...and the earlier change survived the second PATCH.
+    assert resized.json()["aiSuggestionsEnabled"] is False
+
+
+def test_settings_changes_are_isolated_to_one_organization(
+    client: TestClient, platform_admin: PlatformAdmin
+) -> None:
+    headers = _platform_auth(client, platform_admin)
+    first = client.post(ORGANIZATIONS, headers=headers, json={"name": f"A {uuid.uuid4().hex[:8]}"}).json()["id"]
+    second = client.post(ORGANIZATIONS, headers=headers, json={"name": f"B {uuid.uuid4().hex[:8]}"}).json()["id"]
+
+    client.patch(
+        f"{ORGANIZATIONS}/{first}/settings",
+        headers=headers,
+        json={"aiSuggestionsEnabled": False, "duplicateDetectionEnabled": False, "storageLimitMb": 5},
+    )
+
+    listed = {o["id"]: o for o in client.get(ORGANIZATIONS, headers=headers).json()}
+    assert listed[second]["settings"]["aiSuggestionsEnabled"] is True
+    assert listed[second]["settings"]["duplicateDetectionEnabled"] is True
+    assert listed[second]["settings"]["storageLimitMb"] == DEFAULT_STORAGE_LIMIT_MB
+
+
+@pytest.mark.parametrize("bad_limit", [0, -1, 1_000_001])
+def test_storage_limit_is_bounded(client: TestClient, platform_admin: PlatformAdmin, bad_limit: int) -> None:
+    """0 would lock an organization out of uploading with no way back from
+    its own side, and an unbounded upper value makes the limit meaningless."""
+    headers = _platform_auth(client, platform_admin)
+    org_id = client.post(ORGANIZATIONS, headers=headers, json={"name": f"Org {uuid.uuid4().hex[:8]}"}).json()["id"]
+
+    response = client.patch(
+        f"{ORGANIZATIONS}/{org_id}/settings", headers=headers, json={"storageLimitMb": bad_limit}
+    )
+    assert response.status_code == 422, response.text
+
+
+def test_settings_patch_rejects_a_tenant_token(client: TestClient, auth, admin: User) -> None:
+    """The privilege-escalation guard: an organization admin must not be able
+    to raise their own storage limit or re-enable a feature the platform
+    switched off."""
+    response = client.patch(
+        f"{ORGANIZATIONS}/{admin.organization_id}/settings",
+        headers=auth(admin),
+        json={"storageLimitMb": 999_999},
+    )
+    assert response.status_code in (401, 403), response.text
+
+
+def test_settings_patch_404s_for_an_unknown_organization(
+    client: TestClient, platform_admin: PlatformAdmin
+) -> None:
+    headers = _platform_auth(client, platform_admin)
+    response = client.patch(
+        f"{ORGANIZATIONS}/{uuid.uuid4()}/settings", headers=headers, json={"aiSuggestionsEnabled": False}
+    )
+    assert response.status_code == 404, response.text
+
+
+def _run_extraction(db_session: Session, storage, document_id: uuid.UUID) -> None:
+    """Run the real EXTRACT handler for a document's current version — the one
+    place GENERATE_METADATA and GENERATE_EMBEDDING are ever enqueued."""
+    document = db_session.get(Document, document_id)
+    assert document is not None and document.current_version_id is not None
+    job = db_session.scalar(
+        select(AiJob).where(
+            AiJob.document_version_id == document.current_version_id,
+            AiJob.job_type == AiJobType.EXTRACT,
+        )
+    )
+    assert job is not None, "upload should have enqueued an EXTRACT job"
+    TextExtractionService(storage).process_job(db_session, job)
+
+
+def _followup_job_types(db_session: Session, document_id: uuid.UUID) -> set[AiJobType]:
+    document = db_session.get(Document, document_id)
+    assert document is not None
+    rows = db_session.scalars(
+        select(AiJob.job_type).where(
+            AiJob.document_version_id == document.current_version_id,
+            AiJob.job_type != AiJobType.EXTRACT,
+        )
+    ).all()
+    return set(rows)
+
+
+def _upload(client: TestClient, auth, user: User, category: Category, title: str) -> uuid.UUID:
+    response = client.post(
+        "/api/v1/documents",
+        headers=auth(user),
+        data={"title": title, "categoryId": str(category.id)},
+        files={"file": ("doc.txt", io.BytesIO(b"Enough real text for extraction to succeed."), "text/plain")},
+    )
+    assert response.status_code == 201, response.text
+    return uuid.UUID(response.json()["id"])
+
+
+def test_both_ai_jobs_are_enqueued_when_both_settings_are_on(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session, storage
+) -> None:
+    """The baseline the gating tests are measured against — without this, a
+    gating test could pass simply because the job never appeared anyway."""
+    document_id = _upload(client, auth, employee, category, "Both on")
+    _run_extraction(db_session, storage, document_id)
+
+    assert _followup_job_types(db_session, document_id) == {
+        AiJobType.GENERATE_METADATA,
+        AiJobType.GENERATE_EMBEDDING,
+    }
+
+
+def test_ai_suggestions_off_means_the_metadata_job_is_never_created(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session, storage
+) -> None:
+    """Asserts on the absence of a job row, not on an empty API response: the
+    point of gating at the enqueue site is that no work is created at all — no
+    queue entry, no provider call, no retries, no cost."""
+    organization = db_session.get(Organization, employee.organization_id)
+    assert organization is not None
+    organization.ai_suggestions_enabled = False
+    db_session.flush()
+
+    document_id = _upload(client, auth, employee, category, "Suggestions off")
+    _run_extraction(db_session, storage, document_id)
+
+    # Embeddings are untouched — the two settings are independent.
+    assert _followup_job_types(db_session, document_id) == {AiJobType.GENERATE_EMBEDDING}
+
+
+def test_duplicate_detection_off_means_the_embedding_job_is_never_created(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session, storage
+) -> None:
+    organization = db_session.get(Organization, employee.organization_id)
+    assert organization is not None
+    organization.duplicate_detection_enabled = False
+    db_session.flush()
+
+    document_id = _upload(client, auth, employee, category, "Duplicates off")
+    _run_extraction(db_session, storage, document_id)
+
+    assert _followup_job_types(db_session, document_id) == {AiJobType.GENERATE_METADATA}
+
+
+def test_both_off_means_extraction_still_runs_but_nothing_is_chained(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session, storage
+) -> None:
+    """Text extraction is not an AI setting — search and the extraction badge
+    depend on it, so it must keep working regardless."""
+    organization = db_session.get(Organization, employee.organization_id)
+    assert organization is not None
+    organization.ai_suggestions_enabled = False
+    organization.duplicate_detection_enabled = False
+    db_session.flush()
+
+    document_id = _upload(client, auth, employee, category, "Both off")
+    _run_extraction(db_session, storage, document_id)
+
+    assert _followup_job_types(db_session, document_id) == set()
+
+    detail = client.get(f"/api/v1/documents/{document_id}", headers=auth(employee))
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["extractionStatus"] == "SUCCEEDED"
+
+
+def test_existing_suggestions_are_hidden_not_deleted_when_the_setting_goes_off(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session
+) -> None:
+    """Turning the setting off must hide a suggestion the organization already
+    paid for, and turning it back on must bring the same one back — the row is
+    never destroyed."""
+    document_id = _upload(client, auth, employee, category, "Has a suggestion")
+    document = db_session.get(Document, document_id)
+    assert document is not None and document.current_version_id is not None
+
+    db_session.add(
+        AiDocumentAnalysis(
+            document_version_id=document.current_version_id,
+            organization_id=employee.organization_id,
+            status=AiAnalysisStatus.SUCCEEDED,
+            suggested_title="A generated title",
+            suggested_tags=["alpha"],
+        )
+    )
+    db_session.flush()
+
+    organization = db_session.get(Organization, employee.organization_id)
+    assert organization is not None
+
+    visible = client.get(f"/api/v1/documents/{document_id}", headers=auth(employee))
+    assert visible.json()["aiSuggestion"]["title"] == "A generated title"
+
+    organization.ai_suggestions_enabled = False
+    db_session.flush()
+    hidden = client.get(f"/api/v1/documents/{document_id}", headers=auth(employee))
+    assert hidden.json()["aiSuggestion"] is None
+
+    organization.ai_suggestions_enabled = True
+    db_session.flush()
+    restored = client.get(f"/api/v1/documents/{document_id}", headers=auth(employee))
+    assert restored.json()["aiSuggestion"]["title"] == "A generated title", "the row was destroyed, not hidden"
+
+
+def test_similar_documents_returns_empty_when_duplicate_detection_is_off(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session
+) -> None:
+    document_id = _upload(client, auth, employee, category, "Similarity check")
+    organization = db_session.get(Organization, employee.organization_id)
+    assert organization is not None
+
+    organization.duplicate_detection_enabled = False
+    db_session.flush()
+
+    response = client.get(f"/api/v1/documents/{document_id}/similar", headers=auth(employee))
+    # Empty, not an error — the card hides itself on an empty list, so the
+    # feature disappears without the frontend needing to know why.
+    assert response.status_code == 200, response.text
+    assert response.json() == []
+
+
+def test_ai_settings_travel_with_the_logged_in_user(client: TestClient, auth, employee: User) -> None:
+    """The app needs these on first paint to tell "no suggestion yet" apart
+    from "suggestions are switched off" — the two look identical in the
+    document payload."""
+    response = client.get("/api/v1/auth/me", headers=auth(employee))
+    assert response.status_code == 200, response.text
+
+    organization = response.json()["organization"]
+    assert organization["aiSuggestionsEnabled"] is True
+    assert organization["duplicateDetectionEnabled"] is True
+    # Never exposed to a tenant: only /platform may see or change the limit.
+    assert "storageLimitMb" not in organization
+
+
+# --- Phase 4: the storage limit is enforced ---------------------------------
+
+
+def _set_limit_mb(db_session: Session, organization_id: uuid.UUID, limit_mb: int) -> None:
+    organization = db_session.get(Organization, organization_id)
+    assert organization is not None
+    organization.storage_limit_mb = limit_mb
+    db_session.flush()
+
+
+def _upload_bytes(client: TestClient, auth, user: User, category: Category, payload: bytes, title: str):
+    return client.post(
+        "/api/v1/documents",
+        headers=auth(user),
+        data={"title": title, "categoryId": str(category.id)},
+        files={"file": ("f.txt", io.BytesIO(payload), "text/plain")},
+    )
+
+
+def test_upload_is_allowed_right_up_to_the_limit(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session
+) -> None:
+    """The boundary itself must be usable — a limit of exactly N bytes has to
+    accept a payload that brings usage to exactly N, not reject it."""
+    repository = DocumentRepository(db_session)
+    used = repository.storage_used_bytes(employee.organization_id)
+    payload = b"x" * 1000
+    # Limit is stored in MB, so round the target up to a whole MB and fill the
+    # remainder exactly.
+    limit_mb = (used + len(payload) + (1024 * 1024 - 1)) // (1024 * 1024)
+    _set_limit_mb(db_session, employee.organization_id, limit_mb)
+    headroom = limit_mb * 1024 * 1024 - used
+
+    exactly_full = _upload_bytes(client, auth, employee, category, b"x" * headroom, "Exactly at the limit")
+    assert exactly_full.status_code == 201, exactly_full.text
+    assert repository.storage_used_bytes(employee.organization_id) == limit_mb * 1024 * 1024
+
+
+def test_upload_over_the_limit_is_refused_with_a_friendly_message(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session
+) -> None:
+    repository = DocumentRepository(db_session)
+    used = repository.storage_used_bytes(employee.organization_id)
+    limit_mb = max(1, used // (1024 * 1024))
+    _set_limit_mb(db_session, employee.organization_id, limit_mb)
+
+    response = _upload_bytes(client, auth, employee, category, b"y" * (2 * 1024 * 1024), "Too big for the org")
+
+    assert response.status_code == 413, response.text
+    body = response.json()["error"]
+    assert body["message"] == (
+        "Your organization has reached its storage limit. Please contact your administrator."
+    )
+    # Nothing was written — no document row, and usage is untouched.
+    assert repository.storage_used_bytes(employee.organization_id) == used
+    listed = client.get("/api/v1/documents", headers=auth(employee)).json()
+    titles = [d["title"] for d in listed.get("items", listed)]
+    assert "Too big for the org" not in titles
+
+
+def test_a_small_file_is_still_refused_once_the_org_is_full(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session
+) -> None:
+    """The organization limit is independent of the per-file limit: a file far
+    below max_upload_size_mb must still be refused when there's no room."""
+    repository = DocumentRepository(db_session)
+    _set_limit_mb(db_session, employee.organization_id, max(1, repository.storage_used_bytes(employee.organization_id) // (1024 * 1024)))
+
+    response = _upload_bytes(client, auth, employee, category, b"tiny", "A tiny file")
+    assert response.status_code == 413, response.text
+
+
+def test_new_versions_are_also_subject_to_the_limit(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session
+) -> None:
+    """A new version adds to storage rather than replacing, so enforcing only
+    the create path would leave an unbounded way to grow."""
+    repository = DocumentRepository(db_session)
+    created = _upload_bytes(client, auth, employee, category, b"v1", "Versioned under quota")
+    assert created.status_code == 201, created.text
+    document_id = created.json()["id"]
+
+    _set_limit_mb(db_session, employee.organization_id, max(1, repository.storage_used_bytes(employee.organization_id) // (1024 * 1024)))
+
+    response = client.post(
+        f"/api/v1/documents/{document_id}/versions",
+        headers=auth(employee),
+        data={"changeNote": "should be refused"},
+        files={"file": ("f.txt", io.BytesIO(b"z" * (2 * 1024 * 1024)), "text/plain")},
+    )
+    assert response.status_code == 413, response.text
+
+
+def test_restoring_a_version_is_also_subject_to_the_limit(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session
+) -> None:
+    """Restore physically copies the file and inserts a new row, so it spends
+    storage exactly like an upload — the path most easily forgotten."""
+    repository = DocumentRepository(db_session)
+    created = _upload_bytes(client, auth, employee, category, b"original contents", "Restorable")
+    assert created.status_code == 201, created.text
+    document_id = created.json()["id"]
+    second = client.post(
+        f"/api/v1/documents/{document_id}/versions",
+        headers=auth(employee),
+        data={"changeNote": "second revision"},
+        files={"file": ("f.txt", io.BytesIO(b"newer contents"), "text/plain")},
+    )
+    assert second.status_code == 201, second.text
+
+    _set_limit_mb(db_session, employee.organization_id, max(1, repository.storage_used_bytes(employee.organization_id) // (1024 * 1024)))
+    before = repository.storage_used_bytes(employee.organization_id)
+
+    response = client.post(
+        f"/api/v1/documents/{document_id}/versions/1/restore",
+        headers=auth(employee),
+        json={"changeNote": "restoring v1"},
+    )
+    assert response.status_code == 413, response.text
+    assert repository.storage_used_bytes(employee.organization_id) == before
+
+
+def test_the_limit_is_per_organization(
+    client: TestClient, auth, employee: User, category: Category, db_session: Session
+) -> None:
+    """One organization filling up must not block another's uploads."""
+    repository = DocumentRepository(db_session)
+    _set_limit_mb(db_session, employee.organization_id, max(1, repository.storage_used_bytes(employee.organization_id) // (1024 * 1024)))
+    assert _upload_bytes(client, auth, employee, category, b"blocked", "Blocked").status_code == 413
+
+    other_org_id = uuid.uuid4()
+    db_session.execute(
+        text("INSERT INTO organizations (id, name, slug) VALUES (:id, :name, :slug)"),
+        {"id": other_org_id, "name": "Roomy Org", "slug": f"roomy-{other_org_id.hex[:8]}"},
+    )
+    db_session.flush()
+
+    # The other organization is untouched by the first one being full.
+    other = db_session.get(Organization, other_org_id)
+    assert other is not None
+    assert other.storage_limit_mb == DEFAULT_STORAGE_LIMIT_MB
+    assert repository.storage_used_bytes(other_org_id) == 0
